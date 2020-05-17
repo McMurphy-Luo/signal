@@ -18,57 +18,80 @@ namespace signals
       virtual void disconnect() = 0;
     };
 
-    template<typename... T>
+    template<typename R, typename... T>
     struct signal_detail;
     
-    template<typename... T>
+    template<typename R, typename... T>
     struct signal_shared_block {
-      std::weak_ptr<signal_detail<T...>> caller;
-      std::weak_ptr<signal_detail<T...>> callee;
+      std::weak_ptr<signal_detail<R, T...>> caller;
+      std::weak_ptr<signal_detail<R, T...>> callee;
     };
 
-    template<typename... T>
+    template<typename R, typename... T>
     struct slot_shared_block {
-      std::function<void (T...)> the_function;
+      std::function<R (T...)> the_function;
     };
 
-    template<typename... T>
-    void Disconnect(std::shared_ptr<signal_shared_block<T...>> shared_block);
+    template<typename R, typename... T>
+    void Disconnect(std::shared_ptr<signal_shared_block<R, T...>> shared_block);
 
-    template<typename... T>
+    template<typename R, typename... T>
+    bool DefaultCallback(std::function<R(T...)> the_function, T... param) {
+      the_function(param...);
+      return true;
+    }
+
+    template<typename R, typename... T>
     struct signal_detail {
-      std::list<std::shared_ptr<slot_shared_block<T...>>> connections;
-      std::list<std::shared_ptr<signal_shared_block<T...>>> signals_connected_to_me;
-      std::list<std::shared_ptr<signal_shared_block<T...>>> connected_signals;
+      std::list<std::shared_ptr<slot_shared_block<R, T...>>> connections;
+      std::list<std::shared_ptr<signal_shared_block<R, T...>>> signals_connected_to_me;
+      std::list<std::shared_ptr<signal_shared_block<R, T...>>> connected_signals;
 
       ~signal_detail() {
         
       }
 
+      /*
       void operator()(T... param) {
-        typename std::list< std::shared_ptr<slot_shared_block<T...>> >::iterator it_slot = connections.begin();
+        this(DefaultCallback, param...);
+        /*
+        typename std::list<std::shared_ptr<slot_shared_block<R, T...>>>::iterator it_slot = connections.begin();
         for (; it_slot != connections.end(); ++it_slot) {
           (*it_slot)->the_function(param...);
         }
-        typename std::list<std::shared_ptr<signal_shared_block<T...>>>::iterator it_connected_signal = connected_signals.begin();
+        typename std::list<std::shared_ptr<signal_shared_block<R, T...>>>::iterator it_connected_signal = connected_signals.begin();
         for (; it_connected_signal != connected_signals.end(); ++it_connected_signal) {
           (*((*it_connected_signal)->callee.lock()))(param...);
+        }
+        
+      }
+      */
+      
+
+      void operator()(std::function<bool(std::function<R(T...)>, T...)> callback, T... param) {
+        typename std::list<std::shared_ptr<slot_shared_block<R, T...>>>::iterator it_slot = connections.begin();
+        for (; it_slot != connections.end(); ++it_slot) {
+          callback((*it_slot)->the_function, param...);
+        }
+        typename std::list<std::shared_ptr<signal_shared_block<R, T...>>>::iterator it_connected_signal = connected_signals.begin();
+        for (; it_connected_signal != connected_signals.end(); ++it_connected_signal) {
+          (*((*it_connected_signal)->callee.lock()))(callback, param...);
         }
       }
     };
 
-    template<typename... T>
+    template<typename R, typename... T>
     struct signal_slot_connection : public connection_internal_base {
-      std::weak_ptr<signal_detail<T...>> the_signal;
-      std::shared_ptr<slot_shared_block<T...>> the_shared_block;
+      std::weak_ptr<signal_detail<R, T...>> the_signal;
+      std::shared_ptr<slot_shared_block<R, T...>> the_shared_block;
       virtual ~signal_slot_connection() {
         disconnect();
       }
 
       virtual void disconnect() override {
-        std::shared_ptr<signal_detail<T...>> the_signal_locked = the_signal.lock();
+        std::shared_ptr<signal_detail<R, T...>> the_signal_locked = the_signal.lock();
         if (the_signal_locked) {
-          typename std::list<std::shared_ptr<slot_shared_block<T...>>>::const_iterator it = 
+          typename std::list<std::shared_ptr<slot_shared_block<R, T...>>>::const_iterator it = 
             std::find(the_signal_locked->connections.begin(), the_signal_locked->connections.end(), the_shared_block);
           if (it != the_signal_locked->connections.end()) {
             the_signal_locked->connections.erase(it);
@@ -79,11 +102,11 @@ namespace signals
       }
     };
 
-    template<typename... T>
-    void Disconnect(std::shared_ptr<signal_shared_block<T...>> shared_block) {
-      std::shared_ptr<signal_detail<T...>> caller = shared_block->caller.lock();
-      std::shared_ptr<signal_detail<T...>> callee = shared_block->callee.lock();
-      typename std::list<std::shared_ptr<signal_shared_block<T...>>>::iterator it_connected_signal = caller->connected_signals.begin();
+    template<typename R, typename... T>
+    void Disconnect(std::shared_ptr<signal_shared_block<R, T...>> shared_block) {
+      std::shared_ptr<signal_detail<R, T...>> caller = shared_block->caller.lock();
+      std::shared_ptr<signal_detail<R, T...>> callee = shared_block->callee.lock();
+      typename std::list<std::shared_ptr<signal_shared_block<R, T...>>>::iterator it_connected_signal = caller->connected_signals.begin();
       while (it_connected_signal != caller->connected_signals.end()) {
         if ((*it_connected_signal)->callee.lock() == callee) {
           it_connected_signal = caller->connected_signals.erase(it_connected_signal);
@@ -103,15 +126,15 @@ namespace signals
       }
     }
 
-    template<typename... T>
+    template<typename R, typename... T>
     struct signal_signal_connection : public connection_internal_base {
     public:
-      signal_signal_connection(std::shared_ptr<signal_shared_block<T...>> shared_block)
+      signal_signal_connection(std::shared_ptr<signal_shared_block<R, T...>> shared_block)
         : shared_block(shared_block) {
 
       }
 
-      std::shared_ptr<signal_shared_block<T...>> shared_block;
+      std::shared_ptr<signal_shared_block<R, T...>> shared_block;
       virtual ~signal_signal_connection() {
         disconnect();
       }
@@ -150,30 +173,39 @@ namespace signals
     std::shared_ptr<detail::connection_internal_base> connection_detail_;
   };
 
-  template<typename... T>
+  template<typename R, typename... T>
   class signal {
   public:
     signal()
-      : signal_detail_(std::make_shared<detail::signal_detail<T...>>()) {
+      : signal_detail_(std::make_shared<detail::signal_detail<R, T...>>()) {
 
     }
 
     signal(const signal&) = delete;
 
-    signal& operator=(const signal&) = delete;
+    signal& operator=(signal&) = delete;
+
+    signal(const signal&& another)
+      : signal_detail_(std::move(another.signal_detail_)) {
+
+    }
+
+    signal& operator=(signal&& another) {
+      signal_detail_ = std::move(another.signal_detail_);
+    }
 
     ~signal() {
       while (!signal_detail_->signals_connected_to_me.empty()) {
-        detail::Disconnect<T...>(*(signal_detail_->signals_connected_to_me.begin()));
+        detail::Disconnect<R, T...>(*(signal_detail_->signals_connected_to_me.begin()));
       }
       while (!signal_detail_->connected_signals.empty()) {
-        detail::Disconnect<T...>(*(signal_detail_->connected_signals.begin()));
+        detail::Disconnect<R, T...>(*(signal_detail_->connected_signals.begin()));
       }
     }
 
-    connection connect(const std::function<void(T...)>& the_function) {
-      std::shared_ptr<detail::signal_slot_connection<T...>> connection_detail(std::make_shared<detail::signal_slot_connection<T...>>());
-      std::shared_ptr<detail::slot_shared_block<T...>> the_block(std::make_shared<detail::slot_shared_block<T...>>());
+    connection connect(const std::function<R (T...)>& the_function) {
+      std::shared_ptr<detail::signal_slot_connection<R, T...>> connection_detail(std::make_shared<detail::signal_slot_connection<R, T...>>());
+      std::shared_ptr<detail::slot_shared_block<R, T...>> the_block(std::make_shared<detail::slot_shared_block<R, T...>>());
       the_block->the_function = the_function;
       connection_detail->the_shared_block = the_block;
       connection_detail->the_signal = signal_detail_;
@@ -182,23 +214,30 @@ namespace signals
       return result;
     }
 
-    connection connect(const signal<T...>& another) {
-      std::shared_ptr<detail::signal_shared_block<T...>> shared_block(std::make_shared<detail::signal_shared_block<T...>>());
+    connection connect(const signal<R, T...>& another) {
+      std::shared_ptr<detail::signal_shared_block<R, T...>> shared_block(std::make_shared<detail::signal_shared_block<R, T...>>());
       shared_block->callee = another.signal_detail_;
       shared_block->caller = signal_detail_;
       signal_detail_->connected_signals.push_back(shared_block);
       another.signal_detail_->signals_connected_to_me.push_back(shared_block);
-      std::shared_ptr<detail::signal_signal_connection<T...>> connection_concrete(std::make_shared<detail::signal_signal_connection<T...>>(shared_block));
+      std::shared_ptr<detail::signal_signal_connection<R, T...>> connection_concrete(std::make_shared<detail::signal_signal_connection<R, T...>>(shared_block));
       connection result(connection_concrete);
       return result;
     }
 
     void operator()(T... param) {
-      (*signal_detail_)(param...);
+      std::function<bool(std::function<R(T...)>, T...)> the_function = detail::DefaultCallback<R, T...>;
+      (*signal_detail_)(the_function, param...);
+    }
+
+    void operator()(
+      std::function<bool (std::function<R (T...)>, T...)> callback, T... param
+    ) {
+      (*signal_detail_)(callback, param...);
     }
 
   private:
-    std::shared_ptr<detail::signal_detail<T...>> signal_detail_;
+    std::shared_ptr<detail::signal_detail<R, T...>> signal_detail_;
   };
 }
 

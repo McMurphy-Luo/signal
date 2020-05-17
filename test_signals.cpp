@@ -38,7 +38,7 @@ void Test_Multiple_Arguments(int simple_input, std::string& string_output, int& 
 }
 
 TEST_CASE("SimpleTest") {
-  signals::signal<int, int&, int&> sig;
+  signals::signal<void, int, int&, int&> sig;
   signals::connection temp_connect = sig.connect(&Test_SimpleAssign);
   int called_times = 0;
   int output = 0;
@@ -48,8 +48,8 @@ TEST_CASE("SimpleTest") {
 }
 
 TEST_CASE("ConnectDisconnectTest") {
-  signals::signal<int, int&, int&> sig;
-  signals::signal<int, int&, int&> sig2;
+  signals::signal<void, int, int&, int&> sig;
+  signals::signal<void, int, int&, int&> sig2;
   signals::connection temp_connect = sig.connect(&Test_SimpleAssign);
   int output = 0;
   int called_times = 0;
@@ -67,13 +67,13 @@ TEST_CASE("ConnectDisconnectTest") {
 }
 
 TEST_CASE("SignalConnectSignalTest") {
-  signals::signal<int, int&, int&> sig_1;
+  signals::signal<void, int, int&, int&> sig_1;
   sig_1.connect(&Test_SimpleAssign);
   int output = 0;
   int called_times = 0;
   sig_1(5, output, called_times);
   CHECK(called_times == 0);
-  signals::signal<int, int&, int&> sig_2;
+  signals::signal<void, int, int&, int&> sig_2;
   signals::connection conn_sig_slot_1 = sig_1.connect(&Test_SimpleAssign);
   signals::connection conn_sig_1_sig_2 = sig_1.connect(sig_2);
   sig_2.connect(&Test_SimpleAssign);
@@ -94,7 +94,7 @@ TEST_CASE("SignalConnectSignalTest") {
 }
 
 TEST_CASE("TestMultipleSlots") {
-  signals::signal<int, int&, int&> sig_1;
+  signals::signal<void, int, int&, int&> sig_1;
   sig_1.connect(Test_SimpleAssign);
   sig_1.connect(Test_SimplePlusOne);
 
@@ -117,8 +117,8 @@ public:
   TestSignalClassMember(){
     
   }
-  signals::signal<int, std::string&, int&> sig_1;
-  signals::signal<int, std::string&, int&> sig_2;
+  signals::signal<void, int, std::string&, int&> sig_1;
+  signals::signal<void, int, std::string&, int&> sig_2;
 };
 
 class TestConnectionClassMember {
@@ -157,7 +157,7 @@ public:
     ++called_times;
   }
 
-  signals::signal<int, std::string&, int&> sig;
+  signals::signal<void, int, std::string&, int&> sig;
   signals::connection the_constructor_connection;
   signals::connection the_connection_1;
   signals::connection the_connection_2;
