@@ -1,12 +1,5 @@
-#ifndef ZOOM_WINDOWS_SIGNALS_H_
-#define ZOOM_WINDOWS_SIGNALS_H_
-
-#ifdef _DEBUG
-#define _CRTDBG_MAP_ALLOC
-#include <stdlib.h>
-#include <crtdbg.h>
-#include <cassert>
-#endif
+#ifndef SIGNALS_H_
+#define SIGNALS_H_
 
 #include <list>
 #include <functional>
@@ -36,7 +29,7 @@ namespace signals
 
     template<typename... T>
     struct slot_shared_block {
-      std::function<T...> the_function;
+      std::function<void (T...)> the_function;
     };
 
     template<typename... T>
@@ -53,13 +46,13 @@ namespace signals
       }
 
       void operator()(T... param) {
-        std::list<std::shared_ptr<slot_shared_block<T...>>>::iterator it_slot = connections.begin();
+        typename std::list< std::shared_ptr<slot_shared_block<T...>> >::iterator it_slot = connections.begin();
         for (; it_slot != connections.end(); ++it_slot) {
           (*it_slot)->the_function(param...);
         }
-        std::list<std::shared_ptr<signal_shared_block<T>>>::iterator it_connected_signal = connected_signals.begin();
+        typename std::list<std::shared_ptr<signal_shared_block<T...>>>::iterator it_connected_signal = connected_signals.begin();
         for (; it_connected_signal != connected_signals.end(); ++it_connected_signal) {
-          (*it_connected_signal)->callee.lock()->operator()(param);
+          (*((*it_connected_signal)->callee.lock()))(param...);
         }
       }
     };
@@ -75,7 +68,7 @@ namespace signals
       virtual void disconnect() override {
         std::shared_ptr<signal_detail<T...>> the_signal_locked = the_signal.lock();
         if (the_signal_locked) {
-          std::list<std::shared_ptr<slot_shared_block<T...>>>::const_iterator it = 
+          typename std::list<std::shared_ptr<slot_shared_block<T...>>>::const_iterator it = 
             std::find(the_signal_locked->connections.begin(), the_signal_locked->connections.end(), the_shared_block);
           if (it != the_signal_locked->connections.end()) {
             the_signal_locked->connections.erase(it);
@@ -90,7 +83,7 @@ namespace signals
     void Disconnect(std::shared_ptr<signal_shared_block<T...>> shared_block) {
       std::shared_ptr<signal_detail<T...>> caller = shared_block->caller.lock();
       std::shared_ptr<signal_detail<T...>> callee = shared_block->callee.lock();
-      std::list<std::shared_ptr<signal_shared_block<T...>>>::iterator it_connected_signal = caller->connected_signals.begin();
+      typename std::list<std::shared_ptr<signal_shared_block<T...>>>::iterator it_connected_signal = caller->connected_signals.begin();
       while (it_connected_signal != caller->connected_signals.end()) {
         if ((*it_connected_signal)->callee.lock() == callee) {
           it_connected_signal = caller->connected_signals.erase(it_connected_signal);
@@ -137,6 +130,11 @@ namespace signals
 
   class connection {
   public:
+    connection()
+      : connection_detail_() {
+
+    }
+
     connection(std::shared_ptr<detail::connection_internal_base> connection_internal_detail)
       : connection_detail_(connection_internal_detail) {
 
@@ -156,7 +154,7 @@ namespace signals
   class signal {
   public:
     signal()
-      : signal_detail_(new detail::signal_detail<T>()) {
+      : signal_detail_(std::make_shared<detail::signal_detail<T...>>()) {
 
     }
 
@@ -174,8 +172,8 @@ namespace signals
     }
 
     connection connect(const std::function<void(T...)>& the_function) {
-      std::shared_ptr<detail::signal_slot_connection<T...>> connection_detail(new detail::signal_slot_connection<T...>());
-      std::shared_ptr<detail::slot_shared_block<T...>> the_block(new detail::slot_shared_block<T...>());
+      std::shared_ptr<detail::signal_slot_connection<T...>> connection_detail(std::make_shared<detail::signal_slot_connection<T...>>());
+      std::shared_ptr<detail::slot_shared_block<T...>> the_block(std::make_shared<detail::slot_shared_block<T...>>());
       the_block->the_function = the_function;
       connection_detail->the_shared_block = the_block;
       connection_detail->the_signal = signal_detail_;
@@ -185,18 +183,18 @@ namespace signals
     }
 
     connection connect(const signal<T...>& another) {
-      std::shared_ptr<detail::signal_shared_block<T...>> shared_block(new detail::signal_shared_block<T...>);
+      std::shared_ptr<detail::signal_shared_block<T...>> shared_block(std::make_shared<detail::signal_shared_block<T...>>());
       shared_block->callee = another.signal_detail_;
       shared_block->caller = signal_detail_;
       signal_detail_->connected_signals.push_back(shared_block);
       another.signal_detail_->signals_connected_to_me.push_back(shared_block);
-      std::shared_ptr<detail::signal_signal_connection<T...>> connection_concrete(new detail::signal_signal_connection<T...>(shared_block));
+      std::shared_ptr<detail::signal_signal_connection<T...>> connection_concrete(std::make_shared<detail::signal_signal_connection<T...>>(shared_block));
       connection result(connection_concrete);
       return result;
     }
 
     void operator()(T... param) {
-      signal_detail_->operator()<T...>(param...);
+      (*signal_detail_)(param...);
     }
 
   private:
@@ -204,4 +202,4 @@ namespace signals
   };
 }
 
-#endif // ZOOM_WINDOWS_SIGNALS_H_
+#endif // SIGNALS_H_

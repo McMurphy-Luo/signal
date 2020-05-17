@@ -1555,7 +1555,7 @@ inline id performOptionalSelector( id obj, SEL sel ) {
 namespace Catch {
     namespace Detail {
 
-        extern const std::string unprintableString;
+        extern const char unprintableString[4];
 
         std::string rawMemoryToString( const void *object, std::size_t size );
 
@@ -14826,7 +14826,7 @@ namespace Catch {
 
 namespace Detail {
 
-    const std::string unprintableString = "{?}";
+    const char unprintableString[4] = "{?}";
 
     namespace {
         const int hexThreshold = 255;
