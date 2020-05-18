@@ -19,6 +19,7 @@
 #include <sstream>
 
 using namespace signals;
+using std::function;
 
 void Test_SimpleAssign(int input, int& output, int& called_times) {
   output = input;
@@ -211,6 +212,33 @@ TEST_CASE("TestConnectionAsClassMember") {
   test_object.sig(400, output, called_times);
   CHECK(output == "800");
   CHECK(called_times == 6);
+}
+
+int SlotFunctionReturnsInt(int param) {
+  return param * 2;
+}
+
+class ReturnValueSum {
+public:
+  ReturnValueSum()
+    : sum_of_return_value(0){
+
+  }
+
+  bool operator()(function<int(int)> the_function, int the_param) {
+    sum_of_return_value += the_function(the_param);
+    return true;
+  }
+
+  int sum_of_return_value;
+};
+
+TEST_CASE("TestSlotReturnValueCollector") {
+  signal<int, int> the_signal;
+  connection signal_slot_connection = the_signal.connect(SlotFunctionReturnsInt);
+  ReturnValueSum return_value_collector;
+  the_signal(std::bind(std::mem_fn(&ReturnValueSum::operator()), &return_value_collector, std::placeholders::_1, std::placeholders::_2), 5);
+  CHECK(return_value_collector.sum_of_return_value == 10);
 }
 
 int main(int argc, char** argv) {
