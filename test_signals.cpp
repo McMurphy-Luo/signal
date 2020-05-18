@@ -221,12 +221,12 @@ int SlotFunctionReturnsInt(int param) {
 class ReturnValueSum {
 public:
   ReturnValueSum()
-    : sum_of_return_value(0){
+    : sum_of_return_value(0) {
 
   }
 
-  bool operator()(function<int(int)> the_function, int the_param) {
-    sum_of_return_value += the_function(the_param);
+  bool operator()(std::function<int(int)> the_slot, int param) {
+    sum_of_return_value += the_slot(param);
     return true;
   }
 

@@ -36,7 +36,7 @@ namespace signals
     void Disconnect(std::shared_ptr<signal_shared_block<R, T...>> shared_block);
 
     template<typename R, typename... T>
-    bool DefaultCallback(std::function<R(T...)> the_function, T... param) {
+    bool DefaultCallPolicy(std::function<R(T...)> the_function, T... param) {
       the_function(param...);
       return true;
     }
@@ -51,31 +51,14 @@ namespace signals
         
       }
 
-      /*
-      void operator()(T... param) {
-        this(DefaultCallback, param...);
-        /*
+      void operator()(std::function<bool(std::function<R(T...)>, T...)> call_policy, T... param) {
         typename std::list<std::shared_ptr<slot_shared_block<R, T...>>>::iterator it_slot = connections.begin();
         for (; it_slot != connections.end(); ++it_slot) {
-          (*it_slot)->the_function(param...);
+          call_policy((*it_slot)->the_function, param...);
         }
         typename std::list<std::shared_ptr<signal_shared_block<R, T...>>>::iterator it_connected_signal = connected_signals.begin();
         for (; it_connected_signal != connected_signals.end(); ++it_connected_signal) {
-          (*((*it_connected_signal)->callee.lock()))(param...);
-        }
-        
-      }
-      */
-      
-
-      void operator()(std::function<bool(std::function<R(T...)>, T...)> callback, T... param) {
-        typename std::list<std::shared_ptr<slot_shared_block<R, T...>>>::iterator it_slot = connections.begin();
-        for (; it_slot != connections.end(); ++it_slot) {
-          callback((*it_slot)->the_function, param...);
-        }
-        typename std::list<std::shared_ptr<signal_shared_block<R, T...>>>::iterator it_connected_signal = connected_signals.begin();
-        for (; it_connected_signal != connected_signals.end(); ++it_connected_signal) {
-          (*((*it_connected_signal)->callee.lock()))(callback, param...);
+          (*((*it_connected_signal)->callee.lock()))(call_policy, param...);
         }
       }
     };
@@ -226,7 +209,7 @@ namespace signals
     }
 
     void operator()(T... param) {
-      std::function<bool(std::function<R(T...)>, T...)> the_function = detail::DefaultCallback<R, T...>;
+      std::function<bool(std::function<R(T...)>, T...)> the_function = detail::DefaultCallPolicy<R, T...>;
       (*signal_detail_)(the_function, param...);
     }
 
