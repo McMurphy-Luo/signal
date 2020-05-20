@@ -18,8 +18,19 @@
 #include <cstdio>
 #include <sstream>
 
-using namespace signals;
+using std::string;
 using std::function;
+using std::pair;
+using std::make_pair;
+using signals::signal;
+using signals::connection;
+using std::mem_fn;
+using std::ostringstream;
+using std::bind;
+using std::stringstream;
+using std::placeholders::_1;
+using std::placeholders::_2;
+using std::placeholders::_3;
 
 void Test_SimpleAssign(int input, int& output, int& called_times) {
   output = input;
@@ -31,16 +42,16 @@ void Test_SimplePlusOne(int input, int& output, int& called_times) {
   ++called_times;
 }
 
-void Test_Multiple_Arguments(int simple_input, std::string& string_output, int& called_times) {
-  std::ostringstream string_stream;
+void Test_Multiple_Arguments(int simple_input, string& string_output, int& called_times) {
+  ostringstream string_stream;
   string_stream << simple_input;
   string_output = string_stream.str();
   ++called_times;
 }
 
 TEST_CASE("SimpleTest") {
-  signals::signal<void, int, int&, int&> sig;
-  signals::connection temp_connect = sig.connect(&Test_SimpleAssign);
+  signal<void, int, int&, int&> sig;
+  connection temp_connect = sig.connect(&Test_SimpleAssign);
   int called_times = 0;
   int output = 0;
   sig(1, output, called_times);
@@ -49,9 +60,9 @@ TEST_CASE("SimpleTest") {
 }
 
 TEST_CASE("ConnectDisconnectTest") {
-  signals::signal<void, int, int&, int&> sig;
-  signals::signal<void, int, int&, int&> sig2;
-  signals::connection temp_connect = sig.connect(&Test_SimpleAssign);
+  signal<void, int, int&, int&> sig;
+  signal<void, int, int&, int&> sig2;
+  connection temp_connect = sig.connect(&Test_SimpleAssign);
   int output = 0;
   int called_times = 0;
   sig(4, output, called_times);
@@ -68,20 +79,20 @@ TEST_CASE("ConnectDisconnectTest") {
 }
 
 TEST_CASE("SignalConnectSignalTest") {
-  signals::signal<void, int, int&, int&> sig_1;
+  signal<void, int, int&, int&> sig_1;
   sig_1.connect(&Test_SimpleAssign);
   int output = 0;
   int called_times = 0;
   sig_1(5, output, called_times);
   CHECK(called_times == 0);
-  signals::signal<void, int, int&, int&> sig_2;
-  signals::connection conn_sig_slot_1 = sig_1.connect(&Test_SimpleAssign);
-  signals::connection conn_sig_1_sig_2 = sig_1.connect(sig_2);
+  signal<void, int, int&, int&> sig_2;
+  connection conn_sig_slot_1 = sig_1.connect(&Test_SimpleAssign);
+  connection conn_sig_1_sig_2 = sig_1.connect(sig_2);
   sig_2.connect(&Test_SimpleAssign);
   sig_1(5, output, called_times);
   CHECK(called_times == 1);
   CHECK(output == 5);
-  signals::connection conn_sig_2_slot_1 = sig_2.connect(&Test_SimpleAssign);
+  connection conn_sig_2_slot_1 = sig_2.connect(&Test_SimpleAssign);
   sig_1(6, output, called_times);
   CHECK(called_times == 3);
   CHECK(output == 6);
@@ -95,7 +106,7 @@ TEST_CASE("SignalConnectSignalTest") {
 }
 
 TEST_CASE("TestMultipleSlots") {
-  signals::signal<void, int, int&, int&> sig_1;
+  signal<void, int, int&, int&> sig_1;
   sig_1.connect(Test_SimpleAssign);
   sig_1.connect(Test_SimplePlusOne);
 
@@ -103,8 +114,8 @@ TEST_CASE("TestMultipleSlots") {
   int output = 0;
   sig_1(123, output, called_times);
   CHECK(called_times == 0);
-  signals::connection conn_sig_1_slot_1 = sig_1.connect(Test_SimpleAssign);
-  signals::connection conn_sig_1_slot_2 = sig_1.connect(Test_SimplePlusOne);
+  connection conn_sig_1_slot_1 = sig_1.connect(Test_SimpleAssign);
+  connection conn_sig_1_slot_2 = sig_1.connect(Test_SimplePlusOne);
   sig_1(5, output, called_times);
   assert(called_times == 2);
   assert(output == 6);
@@ -118,15 +129,15 @@ public:
   TestSignalClassMember(){
     
   }
-  signals::signal<void, int, std::string&, int&> sig_1;
-  signals::signal<void, int, std::string&, int&> sig_2;
+  signal<void, int, string&, int&> sig_1;
+  signal<void, int, string&, int&> sig_2;
 };
 
 class TestConnectionClassMember {
 public:
   TestConnectionClassMember()
     : sig()
-    , the_constructor_connection(sig.connect(std::bind(std::mem_fn(&TestConnectionClassMember::TestSlot), this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3)))
+    , the_constructor_connection(sig.connect(bind(mem_fn(&TestConnectionClassMember::TestSlot), this, _1, _2, _3)))
     , the_connection_1()
     , the_connection_2() {
   }
@@ -136,11 +147,11 @@ public:
   }
 
   void Connect1() {
-    the_connection_1 = sig.connect(std::bind(std::mem_fn(&TestConnectionClassMember::TestSlot), this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
+    the_connection_1 = sig.connect(bind(mem_fn(&TestConnectionClassMember::TestSlot), this, _1, _2, _3));
   }
 
   void Connect2() {
-    the_connection_2 = sig.connect(std::bind(std::mem_fn(&TestConnectionClassMember::TestSlot), this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
+    the_connection_2 = sig.connect(bind(mem_fn(&TestConnectionClassMember::TestSlot), this, _1, _2, _3));
   }
 
   void Disconnect1() {
@@ -151,17 +162,17 @@ public:
     the_connection_2.disconnect();
   }
 
-  void TestSlot(int input, std::string& output, int& called_times) {
-    std::stringstream stream;
+  void TestSlot(int input, string& output, int& called_times) {
+    stringstream stream;
     stream << input * 2;
     output = stream.str();
     ++called_times;
   }
 
-  signals::signal<void, int, std::string&, int&> sig;
-  signals::connection the_constructor_connection;
-  signals::connection the_connection_1;
-  signals::connection the_connection_2;
+  signal<void, int, string&, int&> sig;
+  connection the_constructor_connection;
+  connection the_connection_1;
+  connection the_connection_2;
 };
 
 TEST_CASE("TestSignalAsClassMember") {
@@ -169,14 +180,14 @@ TEST_CASE("TestSignalAsClassMember") {
   TestSignalClassMember* signal_class_object_2 = new TestSignalClassMember;
   TestSignalClassMember* signal_class_object_3 = new TestSignalClassMember;
 
-  signals::connection test_conn_1 = signal_class_object_1->sig_1.connect(signal_class_object_1->sig_2);
-  signals::connection test_conn_2 = signal_class_object_1->sig_2.connect(signal_class_object_2->sig_1);
-  signals::connection test_conn_3 = signal_class_object_2->sig_1.connect(signal_class_object_2->sig_2);
-  signals::connection test_conn_4 = signal_class_object_2->sig_2.connect(signal_class_object_3->sig_1);
-  signals::connection test_conn_5 = signal_class_object_3->sig_1.connect(signal_class_object_3->sig_2);
-  signals::connection test_conn_6 = signal_class_object_3->sig_2.connect(Test_Multiple_Arguments);
+  connection test_conn_1 = signal_class_object_1->sig_1.connect(signal_class_object_1->sig_2);
+  connection test_conn_2 = signal_class_object_1->sig_2.connect(signal_class_object_2->sig_1);
+  connection test_conn_3 = signal_class_object_2->sig_1.connect(signal_class_object_2->sig_2);
+  connection test_conn_4 = signal_class_object_2->sig_2.connect(signal_class_object_3->sig_1);
+  connection test_conn_5 = signal_class_object_3->sig_1.connect(signal_class_object_3->sig_2);
+  connection test_conn_6 = signal_class_object_3->sig_2.connect(Test_Multiple_Arguments);
 
-  std::string output;
+  string output;
   int called_times = 0;
   signal_class_object_1->sig_1(100, output, called_times);
   CHECK(called_times == 1);
@@ -194,7 +205,7 @@ TEST_CASE("TestSignalAsClassMember") {
 
 TEST_CASE("TestConnectionAsClassMember") {
   TestConnectionClassMember test_object;
-  std::string output;
+  string output;
   int called_times = 0;
   test_object.sig(100, output, called_times);
   CHECK(output == "200");
@@ -221,24 +232,61 @@ int SlotFunctionReturnsInt(int param) {
 class ReturnValueSum {
 public:
   ReturnValueSum()
-    : sum_of_return_value(0) {
+    : sum_of_return_value(0)
+    , called_times(0) {
 
   }
 
-  bool operator()(std::function<int(int)> the_slot, int param) {
+  bool SimpleReturnValueCollect(function<int(int)> the_slot, int param) {
     sum_of_return_value += the_slot(param);
+    ++called_times;
+    return true;
+  }
+
+  bool ReturnValueAsInputCollect(function<int(int)> the_slot, int param) {
+    sum_of_return_value = the_slot(param);
+    ++called_times;
     return true;
   }
 
   int sum_of_return_value;
+  int called_times;
 };
+
+int Test_SimplePlus2(int input) {
+  return input + 2;
+}
+
+int Test_SimpleMinus2(int input) {
+  return input - 2;
+}
+
+int Test_SimpleMultiply2(int input) {
+  return input * 2;
+}
+
+int Test_SimpleDivide2(int input) {
+  return input / 2;
+}
 
 TEST_CASE("TestSlotReturnValueCollector") {
   signal<int, int> the_signal;
   connection signal_slot_connection = the_signal.connect(SlotFunctionReturnsInt);
   ReturnValueSum return_value_collector;
-  the_signal(std::bind(std::mem_fn(&ReturnValueSum::operator()), &return_value_collector, std::placeholders::_1, std::placeholders::_2), 5);
+  the_signal(bind(mem_fn(&ReturnValueSum::SimpleReturnValueCollect), &return_value_collector, _1, _2), 5);
   CHECK(return_value_collector.sum_of_return_value == 10);
+  CHECK(return_value_collector.called_times == 1);
+
+  signal_slot_connection = the_signal.connect(Test_SimplePlus2);
+  connection signal_slot_connection2 = the_signal.connect(Test_SimpleMultiply2);
+  connection signal_slot_connection3 = the_signal.connect(Test_SimpleDivide2);
+  connection signal_slot_connection4 = the_signal.connect(Test_SimpleMinus2);
+
+  return_value_collector.sum_of_return_value = 0;
+  return_value_collector.called_times = 0;
+  the_signal(bind(mem_fn(&ReturnValueSum::ReturnValueAsInputCollect), &return_value_collector, _1, _2), 10);
+  CHECK(return_value_collector.sum_of_return_value == 5);
+  CHECK(return_value_collector.called_times == 4);
 }
 
 int main(int argc, char** argv) {
