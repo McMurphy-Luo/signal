@@ -16,6 +16,7 @@
 #include "catch.hpp"
 #include "signals.h"
 #include <cstdio>
+#include <vector>
 #include <sstream>
 
 using std::string;
@@ -31,6 +32,7 @@ using std::stringstream;
 using std::placeholders::_1;
 using std::placeholders::_2;
 using std::placeholders::_3;
+using std::vector;
 
 void Test_SimpleAssign(int input, int& output, int& called_times) {
   output = input;
@@ -229,27 +231,40 @@ int SlotFunctionReturnsInt(int param) {
   return param * 2;
 }
 
-class ReturnValueSum {
+class ReturnValueCollector {
 public:
-  ReturnValueSum()
-    : sum_of_return_value(0)
+  ReturnValueCollector()
+    : param(0)
+    , return_value_collected(0)
     , called_times(0) {
 
   }
 
-  bool SimpleReturnValueCollect(function<int(int)> the_slot, int param) {
-    sum_of_return_value += the_slot(param);
+  bool SimpleReturnValueCollect(function<int(int)> the_slot) {
+    return_value_collected = the_slot(param);
     ++called_times;
     return true;
   }
 
-  bool ReturnValueAsInputCollect(function<int(int)> the_slot, int param) {
-    sum_of_return_value = the_slot(param);
+  bool ReturnValueAsInputCollect(function<int(int)> the_slot) {
+    return_value_collected = the_slot(param);
+    param = return_value_collected;
     ++called_times;
     return true;
   }
 
-  int sum_of_return_value;
+  bool SlotExecuteBreaker(function<int(int)> the_slot) {
+    return_value_collected = the_slot(param);
+    ++called_times;
+    if (return_value_collected == 10) {
+      return false;
+    }
+    param = return_value_collected;
+    return true;
+  }
+
+  int param;
+  int return_value_collected;
   int called_times;
 };
 
@@ -272,21 +287,54 @@ int Test_SimpleDivide2(int input) {
 TEST_CASE("TestSlotReturnValueCollector") {
   signal<int, int> the_signal;
   connection signal_slot_connection = the_signal.connect(SlotFunctionReturnsInt);
-  ReturnValueSum return_value_collector;
-  the_signal(bind(mem_fn(&ReturnValueSum::SimpleReturnValueCollect), &return_value_collector, _1, _2), 5);
-  CHECK(return_value_collector.sum_of_return_value == 10);
+  ReturnValueCollector return_value_collector;
+  return_value_collector.param = 10;
+  the_signal(bind(mem_fn(&ReturnValueCollector::SimpleReturnValueCollect), &return_value_collector, _1));
+  CHECK(return_value_collector.return_value_collected == 20);
   CHECK(return_value_collector.called_times == 1);
 
   signal_slot_connection = the_signal.connect(Test_SimplePlus2);
   connection signal_slot_connection2 = the_signal.connect(Test_SimpleMultiply2);
   connection signal_slot_connection3 = the_signal.connect(Test_SimpleDivide2);
   connection signal_slot_connection4 = the_signal.connect(Test_SimpleMinus2);
-
-  return_value_collector.sum_of_return_value = 0;
+  return_value_collector.param = 10;
+  return_value_collector.return_value_collected = 0;
   return_value_collector.called_times = 0;
-  the_signal(bind(mem_fn(&ReturnValueSum::ReturnValueAsInputCollect), &return_value_collector, _1, _2), 10);
-  CHECK(return_value_collector.sum_of_return_value == 5);
+  the_signal(bind(mem_fn(&ReturnValueCollector::ReturnValueAsInputCollect), &return_value_collector, _1));
+  CHECK(return_value_collector.return_value_collected == 10);
   CHECK(return_value_collector.called_times == 4);
+}
+
+TEST_CASE("TestSlotExecutingBreaked") {
+  signal<int, int> the_signal;
+
+  vector<connection> connections;
+  connections.push_back(the_signal.connect(Test_SimplePlus2));
+  connections.push_back(the_signal.connect(Test_SimplePlus2));
+  connections.push_back(the_signal.connect(Test_SimplePlus2));
+  connections.push_back(the_signal.connect(Test_SimplePlus2));
+  connections.push_back(the_signal.connect(Test_SimplePlus2));
+  connections.push_back(the_signal.connect(Test_SimplePlus2));
+  connections.push_back(the_signal.connect(Test_SimplePlus2));
+  connections.push_back(the_signal.connect(Test_SimplePlus2));
+
+  ReturnValueCollector return_value_collector;
+  return_value_collector.param = 2;
+  the_signal(bind(mem_fn(&ReturnValueCollector::SlotExecuteBreaker), &return_value_collector, _1));
+  CHECK(return_value_collector.called_times == 4);
+  CHECK(return_value_collector.return_value_collected == 10);
+
+  return_value_collector.called_times = 0;
+  return_value_collector.param = 0;
+  return_value_collector.return_value_collected = 0;
+  connections.clear();
+  the_signal(bind(mem_fn(&ReturnValueCollector::SlotExecuteBreaker), &return_value_collector, _1));
+  CHECK(return_value_collector.called_times == 0);
+  connections.push_back(the_signal.connect(Test_SimplePlus2));
+  return_value_collector.param = 4;
+  the_signal(bind(mem_fn(&ReturnValueCollector::SlotExecuteBreaker), &return_value_collector, _1));
+  CHECK(return_value_collector.called_times == 1);
+  CHECK(return_value_collector.return_value_collected == 6);
 }
 
 int main(int argc, char** argv) {

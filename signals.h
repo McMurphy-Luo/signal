@@ -36,12 +36,6 @@ namespace signals
     void Disconnect(std::shared_ptr<signal_shared_block<R, T...>> shared_block);
 
     template<typename R, typename... T>
-    bool DefaultCallPolicy(std::function<R(T...)> the_function, T... param) {
-      the_function(param...);
-      return true;
-    }
-
-    template<typename R, typename... T>
     struct signal_detail {
       std::list<std::shared_ptr<slot_shared_block<R, T...>>> connections;
       std::list<std::shared_ptr<signal_shared_block<R, T...>>> signals_connected_to_me;
@@ -51,15 +45,34 @@ namespace signals
         
       }
 
-      void operator()(std::function<bool(std::function<R(T...)>, T...)> call_policy, T... param) {
+      void operator()(T... param) {
         typename std::list<std::shared_ptr<slot_shared_block<R, T...>>>::iterator it_slot = connections.begin();
         for (; it_slot != connections.end(); ++it_slot) {
-          call_policy((*it_slot)->the_function, param...);
+          ((*it_slot)->the_function)(param...);
         }
         typename std::list<std::shared_ptr<signal_shared_block<R, T...>>>::iterator it_connected_signal = connected_signals.begin();
         for (; it_connected_signal != connected_signals.end(); ++it_connected_signal) {
-          (*((*it_connected_signal)->callee.lock()))(call_policy, param...);
+          (*((*it_connected_signal)->callee.lock()))(param...);
         }
+      }
+
+      bool operator()(std::function<bool(std::function<R(T...)>)> call_policy) {
+        typename std::list<std::shared_ptr<slot_shared_block<R, T...>>>::iterator it_slot = connections.begin();
+        bool execute_continue = true;
+        for (; it_slot != connections.end(); ++it_slot) {
+          execute_continue = call_policy((*it_slot)->the_function);
+          if (!execute_continue) {
+            return execute_continue;
+          }
+        }
+        typename std::list<std::shared_ptr<signal_shared_block<R, T...>>>::iterator it_connected_signal = connected_signals.begin();
+        for (; it_connected_signal != connected_signals.end(); ++it_connected_signal) {
+          execute_continue = (*((*it_connected_signal)->callee.lock()))(call_policy);
+          if (!execute_continue) {
+            return execute_continue;
+          }
+        }
+        return execute_continue;
       }
     };
 
@@ -209,14 +222,11 @@ namespace signals
     }
 
     void operator()(T... param) {
-      std::function<bool(std::function<R(T...)>, T...)> the_function = detail::DefaultCallPolicy<R, T...>;
-      (*signal_detail_)(the_function, param...);
+      (*signal_detail_)(param...);
     }
 
-    void operator()(
-      std::function<bool (std::function<R (T...)>, T...)> callback, T... param
-    ) {
-      (*signal_detail_)(callback, param...);
+    void operator()(std::function<bool (std::function<R (T...)>)> call_policy) {
+      (*signal_detail_)(call_policy);
     }
 
   private:
