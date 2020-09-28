@@ -83,9 +83,12 @@
   <ItemGroup>
     <ClInclude Include="catch.hpp" />
     <ClInclude Include="signals.h" />
+    <ClInclude Include="signals_minimal.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="main.cpp" />
     <ClCompile Include="test_signals.cpp" />
+    <ClCompile Include="test_signals_minimal.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

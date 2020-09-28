@@ -1,7 +1,3 @@
-//
-// Created by luojiayi on 5/18/17.
-//
-
 #ifdef _DEBUG
 #define _CRTDBG_MAP_ALLOC
 #include <stdlib.h>
@@ -12,7 +8,6 @@
 // allocations to be of _CLIENT_BLOCK type
 #endif // _DEBUG
 
-#define CATCH_CONFIG_RUNNER
 #include "catch.hpp"
 #include "signals.h"
 #include <cstdio>
@@ -335,17 +330,4 @@ TEST_CASE("TestSlotExecutingBreaked") {
   the_signal(bind(mem_fn(&ReturnValueCollector::SlotExecuteBreaker), &return_value_collector, _1));
   CHECK(return_value_collector.called_times == 1);
   CHECK(return_value_collector.return_value_collected == 6);
-}
-
-int main(int argc, char** argv) {
-  printf("Running main() from %s\n", __FILE__);
-
-  int flag = _CrtSetDbgFlag(_CRTDBG_REPORT_FLAG);
-  flag |= _CRTDBG_LEAK_CHECK_DF;
-  flag |= _CRTDBG_ALLOC_MEM_DF;
-  _CrtSetDbgFlag(flag);
-  _CrtSetReportMode(_CRT_WARN, _CRTDBG_MODE_FILE | _CRTDBG_MODE_DEBUG);
-  _CrtSetReportFile(_CRT_WARN, _CRTDBG_FILE_STDERR);
-  _CrtSetBreakAlloc(-1);
-  int result = Catch::Session().run(argc, argv);
 }

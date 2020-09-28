@@ -181,7 +181,7 @@ namespace signals
 
     signal& operator=(signal&) = delete;
 
-    signal(const signal&& another)
+    signal(const signal&& another) noexcept
       : signal_detail_(std::move(another.signal_detail_)) {
 
     }
