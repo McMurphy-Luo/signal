@@ -46,7 +46,7 @@ void Test_Multiple_Arguments(int simple_input, string& string_output, int& calle
   ++called_times;
 }
 
-TEST_CASE("SimpleTest") {
+TEST_CASE("Simple test") {
   signal<void, int, int&, int&> sig;
   connection temp_connect = sig.connect(&Test_SimpleAssign);
   int called_times = 0;
@@ -56,7 +56,7 @@ TEST_CASE("SimpleTest") {
   CHECK(called_times == 1);
 }
 
-TEST_CASE("ConnectDisconnectTest") {
+TEST_CASE("Connect disconnect test") {
   signal<void, int, int&, int&> sig;
   signal<void, int, int&, int&> sig2;
   connection temp_connect = sig.connect(&Test_SimpleAssign);
@@ -75,7 +75,7 @@ TEST_CASE("ConnectDisconnectTest") {
   CHECK(called_times == 2);
 }
 
-TEST_CASE("SignalConnectSignalTest") {
+TEST_CASE("Signal connect signal test") {
   signal<void, int, int&, int&> sig_1;
   sig_1.connect(&Test_SimpleAssign);
   int output = 0;
@@ -102,7 +102,7 @@ TEST_CASE("SignalConnectSignalTest") {
   CHECK(output == 8);
 }
 
-TEST_CASE("TestMultipleSlots") {
+TEST_CASE("Test multiple slots") {
   signal<void, int, int&, int&> sig_1;
   sig_1.connect(Test_SimpleAssign);
   sig_1.connect(Test_SimplePlusOne);
@@ -172,7 +172,7 @@ public:
   connection the_connection_2;
 };
 
-TEST_CASE("TestSignalAsClassMember") {
+TEST_CASE("Test signal as class member") {
   TestSignalClassMember* signal_class_object_1 = new TestSignalClassMember;
   TestSignalClassMember* signal_class_object_2 = new TestSignalClassMember;
   TestSignalClassMember* signal_class_object_3 = new TestSignalClassMember;
@@ -200,7 +200,7 @@ TEST_CASE("TestSignalAsClassMember") {
   delete signal_class_object_3;
 }
 
-TEST_CASE("TestConnectionAsClassMember") {
+TEST_CASE("Test connection as class member") {
   TestConnectionClassMember test_object;
   string output;
   int called_times = 0;
@@ -279,7 +279,7 @@ int Test_SimpleDivide2(int input) {
   return input / 2;
 }
 
-TEST_CASE("TestSlotReturnValueCollector") {
+TEST_CASE("Test slot return value collector") {
   signal<int, int> the_signal;
   connection signal_slot_connection = the_signal.connect(SlotFunctionReturnsInt);
   ReturnValueCollector return_value_collector;
@@ -300,7 +300,7 @@ TEST_CASE("TestSlotReturnValueCollector") {
   CHECK(return_value_collector.called_times == 4);
 }
 
-TEST_CASE("TestSlotExecutingBreaked") {
+TEST_CASE("Test slot executing breaked") {
   signal<int, int> the_signal;
 
   vector<connection> connections;
