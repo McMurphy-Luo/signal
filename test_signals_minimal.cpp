@@ -67,4 +67,29 @@ TEST_CASE("Test class member function for slot") {
 
 TEST_CASE("Test disconnect during execution") {
   signal<void> signal_no_arguments;
+  int slot_0_called_times = 0;
+  connection conn_0 = signal_no_arguments.connect([&slot_0_called_times, &conn_0]() {
+    ++slot_0_called_times;
+    conn_0.disconnect();
+  });
+  signal_no_arguments();
+  CHECK(slot_0_called_times == 1);
+  signal_no_arguments();
+  CHECK(slot_0_called_times == 1);
+  /*
+  int slot_1_called_times = 0;
+  connection conn_1 = signal_no_arguments.connect([&slot_1_called_times, &conn_1]() {
+    ++slot_1_called_times;
+    });
+  int slot_2_called_times = 0;
+  connection conn_2 = signal_no_arguments.connect([&slot_2_called_times, &conn_2]() {
+    ++slot_2_called_times;
+    conn_2.disconnect();
+    });
+  int slot_3_called_times = 0;
+  function<void()> slot_3 = [&slot_3_called_times]() {
+    ++slot_3_called_times;
+  };
+  connection conn_3 = signal_no_arguments.connect(slot_3);
+  */
 }
