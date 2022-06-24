@@ -75,26 +75,16 @@ TEST_CASE("Test disconnect during execution") {
   CHECK(slot_0_called_times == 1);
   signal_no_arguments();
   CHECK(slot_0_called_times == 1);
-  /*
-  int slot_1_called_times = 0;
-  connection conn_1 = signal_no_arguments.connect([&slot_1_called_times, &conn_1]() {
-    ++slot_1_called_times;
-    });
-  int slot_2_called_times = 0;
-  connection conn_2 = signal_no_arguments.connect([&slot_2_called_times, &conn_2]() {
-    ++slot_2_called_times;
+  connection conn_2;
+  connection conn_1 = signal_no_arguments.connect([&conn_2]() {
     conn_2.disconnect();
-    });
-  int slot_3_called_times = 0;
-  function<void()> slot_3 = [&slot_3_called_times]() {
-    ++slot_3_called_times;
-  };
-  connection conn_3 = signal_no_arguments.connect(slot_3);
-  */
-}
-
-TEST_CASE("Test memory leak") {
-
+  });
+  int slot_2_called_times = 0;
+  conn_2 = signal_no_arguments.connect([&slot_2_called_times]() {
+    ++slot_2_called_times;
+  });
+  signal_no_arguments();
+  CHECK(slot_2_called_times == 0);
 }
 
 TEST_CASE("Test memory leak") {

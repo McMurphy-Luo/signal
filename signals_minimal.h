@@ -29,17 +29,30 @@ namespace signals
     template<typename R, typename... T>
     struct signal_detail {
       std::list<std::shared_ptr<slot_shared_block<R, T...>>> connections;
-
-      ~signal_detail() {
-
-      }
+      bool executing = false;
+      bool dirty = false;
 
       void operator()(T... param) {
-        std::list<std::shared_ptr<slot_shared_block<R, T...>>> connections_copy = connections;
-        typename std::list<std::shared_ptr<slot_shared_block<R, T...>>>::iterator it_slot = connections_copy.begin();
-        for (; it_slot != connections_copy.end(); ++it_slot) {
-          ((*it_slot)->the_function)(param...);
+        executing = true;
+        dirty = false;// We iterate this signal it becomes dirty after execution
+        typename std::list<std::shared_ptr<slot_shared_block<R, T...>>>::iterator it_slot = connections.begin();
+        for (; it_slot != connections.end(); ++it_slot) {
+          if (((*it_slot)->the_function)) {
+            ((*it_slot)->the_function)(param...);
+          }
         }
+        if (dirty) {
+          it_slot = connections.begin();
+          while (it_slot != connections.end()) {
+            if (!((*it_slot)->the_function)) {
+              it_slot = connections.erase(it_slot);
+            } else {
+              ++it_slot;
+            }
+          }
+          dirty = false;
+        }
+        executing = false;
       }
     };
 
@@ -57,7 +70,12 @@ namespace signals
           typename std::list<std::shared_ptr<slot_shared_block<R, T...>>>::const_iterator it = 
             std::find(the_signal_locked->connections.begin(), the_signal_locked->connections.end(), the_shared_block);
           if (it != the_signal_locked->connections.end()) {
-            the_signal_locked->connections.erase(it);
+            if (the_signal_locked->executing) { // To avoid iterator invalidation
+              (*it)->the_function = nullptr; //
+              the_signal_locked->dirty = true; // We mark signal dirty. Invalid function will be erased after during signal execution
+            } else {
+              the_signal_locked->connections.erase(it);
+            }
           }
         }
         the_signal.reset();
