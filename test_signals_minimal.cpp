@@ -35,7 +35,6 @@ namespace {
 TEST_CASE("Test no arguments signal") {
   signal<void> signal_without_arguments;
   int slot_called_times = 0;
-
   function<void()> increment = [&slot_called_times]() {
     ++slot_called_times;
   };
@@ -92,4 +91,12 @@ TEST_CASE("Test disconnect during execution") {
   };
   connection conn_3 = signal_no_arguments.connect(slot_3);
   */
+}
+
+TEST_CASE("Test memory leak") {
+
+}
+
+TEST_CASE("Test memory leak") {
+
 }

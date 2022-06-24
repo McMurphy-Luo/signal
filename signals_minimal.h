@@ -35,8 +35,9 @@ namespace signals
       }
 
       void operator()(T... param) {
-        typename std::list<std::shared_ptr<slot_shared_block<R, T...>>>::iterator it_slot = connections.begin();
-        for (; it_slot != connections.end(); ++it_slot) {
+        std::list<std::shared_ptr<slot_shared_block<R, T...>>> connections_copy = connections;
+        typename std::list<std::shared_ptr<slot_shared_block<R, T...>>>::iterator it_slot = connections_copy.begin();
+        for (; it_slot != connections_copy.end(); ++it_slot) {
           ((*it_slot)->the_function)(param...);
         }
       }
@@ -95,7 +96,7 @@ namespace signals
   {
     return invoke_impl(0
       , std::index_sequence<Is..., sizeof...(Is)>{}
-    , std::forward<F>(func)
+      , std::forward<F>(func)
       , std::forward<Tuple>(args));
   }
 
@@ -104,7 +105,7 @@ namespace signals
   {
     return invoke_impl(0
       , std::index_sequence<>{}
-    , std::forward<F>(func)
+      , std::forward<F>(func)
       , std::forward_as_tuple(std::forward<Args>(args)...));
   }
 
