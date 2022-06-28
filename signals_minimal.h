@@ -30,11 +30,11 @@ namespace signals
     struct signal_detail {
       std::list<std::shared_ptr<slot_shared_block<R, T...>>> connections;
       bool executing = false;
-      bool dirty = false;
+      bool dirty = false; // flag indicating the situation that disconnect happens during signal executing
 
       void operator()(T... param) {
         executing = true;
-        dirty = false;// We iterate this signal it becomes dirty after execution
+        dirty = false;// We iterate this signal if it becomes dirty during execution
         typename std::list<std::shared_ptr<slot_shared_block<R, T...>>>::iterator it_slot = connections.begin();
         for (; it_slot != connections.end(); ++it_slot) {
           if (((*it_slot)->the_function)) {
@@ -91,15 +91,25 @@ namespace signals
 
     }
 
-    connection(std::shared_ptr<detail::connection_internal_base> connection_internal_detail)
-      : connection_detail_(connection_internal_detail) {
+    connection(std::unique_ptr<detail::connection_internal_base>&& connection_internal_detail)
+      : connection_detail_(std::move(connection_internal_detail)) {
 
+    }
+    
+    connection(connection&& rhs) noexcept
+      : connection_detail_(std::move(rhs.connection_detail_)) {
+      
+    }
+
+    connection& operator=(connection&& rhs) noexcept {
+      connection_detail_ = std::move(rhs.connection_detail_);
+      return *this;
     }
 
     void disconnect() { if (connection_detail_) connection_detail_->disconnect(); }
 
   private:
-    std::shared_ptr<detail::connection_internal_base> connection_detail_;
+    std::unique_ptr<detail::connection_internal_base> connection_detail_;
   };
 
   template <std::size_t... Is, typename F, typename Tuple>
@@ -155,7 +165,7 @@ namespace signals
 
     signal& operator=(signal&) = delete;
 
-    signal(const signal&& another) noexcept
+    signal(signal&& another) noexcept
       : signal_detail_(std::move(another.signal_detail_)) {
 
     }
@@ -165,24 +175,24 @@ namespace signals
     }
 
     connection connect(const std::function<R (T...)>& the_function) {
-      std::shared_ptr<detail::signal_slot_connection<R, T...>> connection_detail(std::make_shared<detail::signal_slot_connection<R, T...>>());
+      std::unique_ptr<detail::signal_slot_connection<R, T...>> connection_detail(new detail::signal_slot_connection<R, T...>());
       std::shared_ptr<detail::slot_shared_block<R, T...>> the_block(std::make_shared<detail::slot_shared_block<R, T...>>());
       the_block->the_function = the_function;
       connection_detail->the_shared_block = the_block;
       connection_detail->the_signal = signal_detail_;
       signal_detail_->connections.push_back(the_block);
-      connection result(connection_detail);
+      connection result(std::move(connection_detail));
       return result;
     }
 
     connection connect(std::function<R(T...)>&& the_function) {
-      std::shared_ptr<detail::signal_slot_connection<R, T...>> connection_detail(std::make_shared<detail::signal_slot_connection<R, T...>>());
+      std::unique_ptr<detail::signal_slot_connection<R, T...>> connection_detail(new detail::signal_slot_connection<R, T...>());
       std::shared_ptr<detail::slot_shared_block<R, T...>> the_block(std::make_shared<detail::slot_shared_block<R, T...>>());
       the_block->the_function = std::move(the_function);
       connection_detail->the_shared_block = the_block;
       connection_detail->the_signal = signal_detail_;
       signal_detail_->connections.push_back(the_block);
-      connection result(connection_detail);
+      connection result(std::move(connection_detail));
       return result;
     }
 
