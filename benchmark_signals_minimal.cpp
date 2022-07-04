@@ -19,8 +19,8 @@ void BenchMarkZero(benchmark::State& state) {
 BENCHMARK(BenchMarkZero);
 
 void BenchMarkSignalConnect(benchmark::State& state) {
+  signals::signal<void, int&> simple_signal;
   for (auto _ : state) {
-    signals::signal<void, int&> simple_signal;
     simple_signal.connect(SimpleSlot);
   }
 }
@@ -28,8 +28,8 @@ void BenchMarkSignalConnect(benchmark::State& state) {
 BENCHMARK(BenchMarkSignalConnect);
 
 void BenchMarkBoostConnect(benchmark::State& state) {
+  boost::signals2::signal<void(int&)> simple_signal;
   for (auto _ : state) {
-    boost::signals2::signal<void(int&)> simple_signal;
     simple_signal.connect(SimpleSlot);
   }
 }
@@ -38,8 +38,8 @@ BENCHMARK(BenchMarkBoostConnect);
 
 void BenchMarkSignalSimple(benchmark::State& state) {
   int i = 0;
+  signals::signal<void, int&> simple_signal;
   for (auto _ : state) {
-    signals::signal<void, int&> simple_signal;
     signals::connection conn = simple_signal.connect(SimpleSlot);
     simple_signal(i);
   }
@@ -50,8 +50,8 @@ BENCHMARK(BenchMarkSignalSimple);
 
 void BenchMarkBoostSimple(benchmark::State& state) {
   int i = 0;
+  boost::signals2::signal<void(int&)> simple_signal;
   for (auto _ : state) {
-    boost::signals2::signal<void(int&)> simple_signal;
     boost::signals2::connection conn = simple_signal.connect(SimpleSlot);
     simple_signal(i);
   }

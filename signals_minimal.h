@@ -67,13 +67,13 @@ namespace signals
       virtual void disconnect() override {
         std::shared_ptr<signal_detail<R, T...>> the_signal_locked = the_signal.lock();
         if (the_signal_locked) {
-          typename std::list<std::shared_ptr<slot_shared_block<R, T...>>>::const_iterator it = 
-            std::find(the_signal_locked->connections.begin(), the_signal_locked->connections.end(), the_shared_block);
-          if (it != the_signal_locked->connections.end()) {
-            if (the_signal_locked->executing) { // To avoid iterator invalidation
-              (*it)->the_function = nullptr; //
-              the_signal_locked->dirty = true; // We mark signal dirty. Invalid function will be erased after during signal execution
-            } else {
+          if (the_signal_locked->executing) {
+            the_shared_block->the_function = nullptr;
+            the_signal_locked->dirty = true; // We mark signal dirty. Invalid function will be erased after during signal execution
+          } else {
+            typename std::list<std::shared_ptr<slot_shared_block<R, T...>>>::const_iterator it =
+              std::find(the_signal_locked->connections.begin(), the_signal_locked->connections.end(), the_shared_block);
+            if (it != the_signal_locked->connections.end()) {
               the_signal_locked->connections.erase(it);
             }
           }

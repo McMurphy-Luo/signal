@@ -18,10 +18,7 @@
 #include <cstdio>
 #include <vector>
 #include <sstream>
-
-using std::function;
-using signals::signal;
-using signals::connection;
+#include "boost/signals2.hpp"
 
 namespace {
   class TestClass {
@@ -33,12 +30,12 @@ namespace {
 }
 
 TEST_CASE("Test no arguments signal") {
-  signal<void> signal_without_arguments;
+  signals::signal<void> signal_without_arguments;
   int slot_called_times = 0;
-  function<void()> increment = [&slot_called_times]() {
+  std::function<void()> increment = [&slot_called_times]() {
     ++slot_called_times;
   };
-  connection test_conn = signal_without_arguments.connect(increment);
+  signals::connection test_conn = signal_without_arguments.connect(increment);
   signal_without_arguments();
   CHECK(slot_called_times == 1);
   test_conn.disconnect();
@@ -48,15 +45,15 @@ TEST_CASE("Test no arguments signal") {
   signal_without_arguments();
   CHECK(slot_called_times == 1);
   test_conn = signal_without_arguments.connect(increment);
-  connection test_conn2 = signal_without_arguments.connect(increment);
+  signals::connection test_conn2 = signal_without_arguments.connect(increment);
   signal_without_arguments();
   CHECK(slot_called_times == 3);
 }
 
 TEST_CASE("Test class member function for slot") {
   TestClass obj;
-  signal<void> signal_no_arguments;
-  connection conn = signal_no_arguments.connect(&obj, &TestClass::Increment);
+  signals::signal<void> signal_no_arguments;
+  signals::connection conn = signal_no_arguments.connect(&obj, &TestClass::Increment);
   signal_no_arguments();
   CHECK(obj.called_times_ == 1);
   conn.disconnect();
@@ -64,10 +61,33 @@ TEST_CASE("Test class member function for slot") {
   CHECK(obj.called_times_ == 1);
 }
 
-TEST_CASE("Test disconnect during execution") {
-  signal<void> signal_no_arguments;
+TEST_CASE("Test boost disconnect during execution") {
+  boost::signals2::signal<void()> signal_no_arguments;
   int slot_0_called_times = 0;
-  connection conn_0 = signal_no_arguments.connect([&slot_0_called_times, &conn_0]() {
+  boost::signals2::connection conn_0 = signal_no_arguments.connect([&slot_0_called_times, &conn_0]() {
+    ++slot_0_called_times;
+    conn_0.disconnect();
+    });
+  signal_no_arguments();
+  CHECK(slot_0_called_times == 1);
+  signal_no_arguments();
+  CHECK(slot_0_called_times == 1);
+  boost::signals2::connection conn_2;
+  boost::signals2::connection conn_1 = signal_no_arguments.connect([&conn_2]() {
+    conn_2.disconnect();
+    });
+  int slot_2_called_times = 0;
+  conn_2 = signal_no_arguments.connect([&slot_2_called_times]() {
+    ++slot_2_called_times;
+    });
+  signal_no_arguments();
+  CHECK(slot_2_called_times == 0);
+}
+
+TEST_CASE("Test signal disconnect during execution") {
+  signals::signal<void> signal_no_arguments;
+  int slot_0_called_times = 0;
+  signals::connection conn_0 = signal_no_arguments.connect([&slot_0_called_times, &conn_0]() {
     ++slot_0_called_times;
     conn_0.disconnect();
   });
@@ -75,8 +95,8 @@ TEST_CASE("Test disconnect during execution") {
   CHECK(slot_0_called_times == 1);
   signal_no_arguments();
   CHECK(slot_0_called_times == 1);
-  connection conn_2;
-  connection conn_1 = signal_no_arguments.connect([&conn_2]() {
+  signals::connection conn_2;
+  signals::connection conn_1 = signal_no_arguments.connect([&conn_2]() {
     conn_2.disconnect();
   });
   int slot_2_called_times = 0;
@@ -87,6 +107,20 @@ TEST_CASE("Test disconnect during execution") {
   CHECK(slot_2_called_times == 0);
 }
 
-TEST_CASE("Test memory leak") {
+TEST_CASE("Test boost connect during execution") {
+  boost::signals2::signal<void()> signal_no_arguments;
+  int slot_0_called_times = 0;
+  boost::signals2::connection conn_out = signal_no_arguments.connect([&signal_no_arguments, &conn_out]() {
+    conn_out = signal_no_arguments.connect([]() {});
+  });
+  signal_no_arguments();
+}
 
+TEST_CASE("Test signal connect during execution") {
+  signals::signal<void> signal_no_arguments;
+  int slot_0_called_times = 0;
+  signals::connection conn_out = signal_no_arguments.connect([&signal_no_arguments, &conn_out]() {
+    conn_out = signal_no_arguments.connect([]() {});
+  });
+  signal_no_arguments();
 }
