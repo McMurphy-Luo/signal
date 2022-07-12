@@ -51,8 +51,8 @@ namespace signals
 
       }
 
-      std::function<R(T...)>& operator*() const { return (*it_)->the_function; }
-      std::function<R(T...)>* operator->() const { return &((*it_)->the_function); }
+      reference operator*() const { return (*it_)->the_function; }
+      pointer operator->() const { return &((*it_)->the_function); }
       slot_iterator& operator++() { return ++it_; return *this; }
       slot_iterator& operator--() { return --it_; return *this; }
       slot_iterator operator++(int) { slot_iterator tmp = *this; ++(*this); return tmp; }
@@ -91,8 +91,8 @@ namespace signals
 
       }
 
-      const std::function<R(T...)>& operator*() const { return (*it_)->the_function; }
-      const std::function<R(T...)>* operator->() const { return &((*it_)->the_function); }
+      reference operator*() const { return (*it_)->the_function; }
+      pointer operator->() const { return &((*it_)->the_function); }
       slot_const_iterator& operator++() { ++it_; return *this; }
       slot_const_iterator& operator--() { --it_; return *this; }
       slot_const_iterator operator++(int) { slot_const_iterator tmp = *this; ++(*this); return tmp; }

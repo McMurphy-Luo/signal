@@ -203,4 +203,54 @@ TEST_CASE("Test signal iterator stl compatibility") {
   std::iterator_traits<signals::signal<int, int>::iterator>::value_type item_2 = *(std::prev(it));
   CHECK(item(5) == 8);
   CHECK(item_2(9) == 12);
+  signals::signal<int, int>::const_iterator it_1 = test_simple_signal.begin();
+  signals::signal<int, int>::const_iterator it_2 = test_simple_signal.end();
+  std::swap(it_1, it_2);
+  CHECK(it_1 == test_simple_signal.end());
+  CHECK(it_2 == test_simple_signal.begin());
+}
+
+TEST_CASE("Test disconnect during iterating") {
+  signals::signal<void> test_simple_signal;
+  signals::connection conn = test_simple_signal.connect([&conn] {
+    conn.disconnect();
+  });
+  signals::connection conn_2 = test_simple_signal.connect([] {});
+  signals::connection conn_3 = test_simple_signal.connect([&conn_3] {
+    conn_3.disconnect();
+  });
+  signals::connection conn_4 = test_simple_signal.connect([] {});
+  signals::connection conn_5 = test_simple_signal.connect([] {});
+  signals::connection conn_6 = test_simple_signal.connect([&conn_5] { conn_5.disconnect(); });
+  signals::connection conn_7 = test_simple_signal.connect([] {});
+  signals::connection conn_9;
+  signals::connection conn_8 = test_simple_signal.connect([&conn_9] { conn_9.disconnect(); });
+  conn_9 = test_simple_signal.connect([] {});
+  signals::connection conn_10 = test_simple_signal.connect([] {});
+
+  signals::signal<void>::const_iterator it = test_simple_signal.begin();
+  while (it != test_simple_signal.end()) {
+    (*it)();
+    ++it;
+  }
+}
+
+TEST_CASE("Test boost disconnect during iterating") {
+  boost::signals2::signal<void()> test_simple_signal;
+  boost::signals2::connection conn = test_simple_signal.connect([&conn] {
+    conn.disconnect();
+  });
+  boost::signals2::connection conn_2 = test_simple_signal.connect([] {});
+  boost::signals2::connection conn_3 = test_simple_signal.connect([&conn_3] {
+    conn_3.disconnect();
+  });
+  boost::signals2::connection conn_4 = test_simple_signal.connect([] {});
+  boost::signals2::connection conn_5 = test_simple_signal.connect([] {});
+  boost::signals2::connection conn_6 = test_simple_signal.connect([&conn_5] { conn_5.disconnect(); });
+  boost::signals2::connection conn_7 = test_simple_signal.connect([] {});
+  boost::signals2::connection conn_9;
+  boost::signals2::connection conn_8 = test_simple_signal.connect([&conn_9] { conn_9.disconnect(); });
+  conn_9 = test_simple_signal.connect([] {});
+  boost::signals2::connection conn_10 = test_simple_signal.connect([] {});
+  test_simple_signal();
 }
