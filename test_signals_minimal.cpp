@@ -124,3 +124,83 @@ TEST_CASE("Test signal connect during execution") {
   });
   signal_no_arguments();
 }
+
+TEST_CASE("Test signal iterator 1") {
+  signals::signal<int, int> signal_simple;
+  signals::connection conn_plus_1 = signal_simple.connect([](int x) -> int {
+    return x + 1;
+  });
+  signals::connection conn_multiply_2 = signal_simple.connect([](int x) -> int {
+    return x * 2;
+  });
+  signals::connection conn_minus_3 = signal_simple.connect([](int x) -> int {
+    return x - 3;
+  });
+  signals::signal<int, int>::const_iterator it = signal_simple.begin();
+  CHECK((*it)(5) == 6);
+  CHECK(it != signal_simple.end());
+  ++it;
+  CHECK((*it)(5) == 10);
+  CHECK((*it--)(5) == 10);
+  CHECK(it == signal_simple.begin());
+  CHECK((*it)(5) == 6);
+  CHECK((*it++)(5) == 6);
+  CHECK((*it++)(5) == 10);
+  CHECK((*it)(5) == 2);
+  ++it;
+  CHECK(it == signal_simple.end());
+  it = signal_simple.begin();
+  signals::signal<int, int> signal_simple_2;
+  signals::connection conn = signal_simple_2.connect([](int x) -> int {
+    return x * x;
+  });
+  it = signal_simple_2.begin();
+  CHECK((*it)(5) == 25);
+  ++it;
+  CHECK(it == signal_simple_2.end());
+}
+
+TEST_CASE("Test signal iterator 2") {
+  signals::signal<int, int, bool&> signal_of_interupt;
+  signals::connection conn_1 = signal_of_interupt.connect([](int x, bool& handled) -> int {
+    return x * 16;
+  });
+  signals::connection conn_2 = signal_of_interupt.connect([](int x, bool& handled) -> int {
+    handled = true;
+    return x - 3;
+  });
+  signals::connection conn_3 = signal_of_interupt.connect([](int x, bool& handled) -> int {
+    return x * 2;
+  });
+
+  int init = 1;
+  signals::signal<int, int, bool&>::const_iterator it = signal_of_interupt.begin();
+
+  while (it != signal_of_interupt.end()) {
+    bool handled = false;
+    init = (*it)(init, handled);
+    if (handled) {
+      break;
+    }
+    ++it;
+  }
+  CHECK(init == 13);
+}
+
+TEST_CASE("Test signal iterator stl compatibility") {
+  signals::signal<int, int> test_simple_signal;
+  signals::connection conn = test_simple_signal.connect([](int i) { return i + 3; });
+  signals::signal<int, int>::const_iterator it = test_simple_signal.begin();
+  std::advance(it, 1);
+  CHECK(it == test_simple_signal.end());
+  CHECK(std::end(test_simple_signal) == it);
+  std::advance(it, -1);
+  CHECK(std::begin(test_simple_signal) == it);
+  CHECK(std::end(test_simple_signal) == std::next(it));
+  std::advance(it, 1);
+  CHECK(std::begin(test_simple_signal) == std::prev(it));
+  std::iterator_traits<signals::signal<int, int>::const_iterator>::value_type item = *(std::prev(it));
+  std::iterator_traits<signals::signal<int, int>::iterator>::value_type item_2 = *(std::prev(it));
+  CHECK(item(5) == 8);
+  CHECK(item_2(9) == 12);
+}

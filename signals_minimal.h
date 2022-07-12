@@ -27,10 +27,93 @@ namespace signals
     };
 
     template<typename R, typename... T>
+    class slot_const_iterator;
+
+    template<typename R, typename... T>
+    class slot_iterator {
+      friend class slot_const_iterator<R, T...>;
+    public:
+      using iterator_category = std::bidirectional_iterator_tag;
+      using value_type = std::function<R(T...)>;
+      using difference_type = std::ptrdiff_t;
+      using pointer = std::function<R(T...)>*;
+      using reference = std::function<R(T...)>&;
+
+      slot_iterator()
+        : it_()
+      {
+
+      }
+
+      slot_iterator(typename std::list<std::shared_ptr<slot_shared_block<R, T...>>>::iterator it)
+        : it_(it)
+      {
+
+      }
+
+      std::function<R(T...)>& operator*() const { return (*it_)->the_function; }
+      std::function<R(T...)>* operator->() const { return &((*it_)->the_function); }
+      slot_iterator& operator++() { return ++it_; return *this; }
+      slot_iterator& operator--() { return --it_; return *this; }
+      slot_iterator operator++(int) { slot_iterator tmp = *this; ++(*this); return tmp; }
+      slot_iterator operator--(int) { slot_iterator tmp = *this; --(*this); return tmp; }
+      friend bool operator== (const slot_iterator& a, const slot_iterator& b) { return a.it_ == b.it_; }
+      friend bool operator!= (const slot_iterator& a, const slot_iterator& b) { return a.it_ != b.it_; }
+
+    private:
+      typename std::list<std::shared_ptr<slot_shared_block<R, T...>>>::iterator it_;
+    };
+
+    template<typename R, typename... T>
+    class slot_const_iterator {
+    public:
+      using iterator_category = std::bidirectional_iterator_tag;
+      using value_type = std::function<R(T...)>;
+      using difference_type = std::ptrdiff_t;
+      using pointer = const std::function<R(T...)>*;
+      using reference = const std::function<R(T...)>&;
+
+      slot_const_iterator()
+        : it_()
+      {
+
+      }
+
+      slot_const_iterator(typename std::list<std::shared_ptr<slot_shared_block<R, T...>>>::const_iterator it)
+        : it_(it)
+      {
+
+      }
+
+      slot_const_iterator(slot_iterator<R, T...> non_const_it)
+        : it_(non_const_it.it_)
+      {
+
+      }
+
+      const std::function<R(T...)>& operator*() const { return (*it_)->the_function; }
+      const std::function<R(T...)>* operator->() const { return &((*it_)->the_function); }
+      slot_const_iterator& operator++() { ++it_; return *this; }
+      slot_const_iterator& operator--() { --it_; return *this; }
+      slot_const_iterator operator++(int) { slot_const_iterator tmp = *this; ++(*this); return tmp; }
+      slot_const_iterator operator--(int) { slot_const_iterator tmp = *this; --(*this); return tmp; }
+      friend bool operator== (const slot_const_iterator& a, const slot_const_iterator& b) { return a.it_ == b.it_; }
+      friend bool operator!= (const slot_const_iterator& a, const slot_const_iterator& b) { return a.it_ != b.it_; }
+
+    private:
+      typename std::list<std::shared_ptr<slot_shared_block<R, T...>>>::const_iterator it_;
+    };
+
+    template<typename R, typename... T>
     struct signal_detail {
       std::list<std::shared_ptr<slot_shared_block<R, T...>>> connections;
       bool executing = false;
       bool dirty = false; // flag indicating the situation that disconnect happens during signal executing
+
+      slot_iterator<R, T...> begin() { return slot_iterator<R, T...>(connections.begin()); }
+      slot_iterator<R, T...> end() { return slot_iterator<R, T...>(connections.end()); }
+      slot_iterator<R, T...> cbegin() { return slot_const_iterator<R, T...>(connections.cbegin()); }
+      slot_iterator<R, T...> cend() { return slot_const_iterator<R, T...>(connections.cend()); }
 
       void operator()(T... param) {
         executing = true;
@@ -156,6 +239,9 @@ namespace signals
   template<typename R, typename... T>
   class signal {
   public:
+    using iterator = detail::slot_iterator<R, T...>;
+    using const_iterator = detail::slot_const_iterator<R, T...>;
+
     signal()
       : signal_detail_(std::make_shared<detail::signal_detail<R, T...>>()) {
 
@@ -163,7 +249,7 @@ namespace signals
 
     signal(const signal&) = delete;
 
-    signal& operator=(signal&) = delete;
+    signal& operator=(const signal&) = delete;
 
     signal(signal&& another) noexcept
       : signal_detail_(std::move(another.signal_detail_)) {
@@ -173,6 +259,11 @@ namespace signals
     signal& operator=(signal&& another) noexcept {
       signal_detail_ = std::move(another.signal_detail_);
     }
+
+    iterator begin() { return signal_detail_->begin(); }
+    iterator end() { return signal_detail_->end(); }
+    const_iterator cbegin() { return signal_detail_->cbegin(); }
+    const_iterator cend() { return signal_detail_->cend(); }
 
     connection connect(const std::function<R (T...)>& the_function) {
       std::unique_ptr<detail::signal_slot_connection<R, T...>> connection_detail(new detail::signal_slot_connection<R, T...>());
@@ -199,7 +290,7 @@ namespace signals
     template<typename C, typename... V>
     connection connect(C* obj, R(C::*member_function)(V...)) {
       return connect([binder = bind(obj, member_function)](T... params) -> R {
-        invoke(binder, params...);
+        return invoke(binder, params...);
       });
     }
 
