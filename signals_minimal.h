@@ -309,6 +309,7 @@ namespace signals
       }
       return iterator(signal_detail_->slots->connections.begin(), shared_block);
     }
+
     iterator end() {
       std::shared_ptr<detail::iterator_detail<R, T...>> shared_block = iterator_detail_.lock();
       if (!shared_block) {
@@ -317,6 +318,7 @@ namespace signals
       }
       return iterator(signal_detail_->slots->connections.end(), shared_block);
     }
+
     const_iterator cbegin() {
       std::shared_ptr<detail::iterator_detail<R, T...>> shared_block = iterator_detail_.lock();
       if (!shared_block) {
@@ -325,6 +327,7 @@ namespace signals
       }
       return const_iterator(signal_detail_->slots->connections.begin(), shared_block);
     }
+
     const_iterator cend() {
       std::shared_ptr<detail::iterator_detail<R, T...>> shared_block = iterator_detail_.lock();
       if (!shared_block) {

@@ -269,7 +269,7 @@ struct item {
   int* count;
 };
 
-TEST_CASE("Test slot termination") {
+TEST_CASE("Test slot resource management and termination") {
   signals::signal<void> test_signal;
   int test = 0;
   signals::connection conn = test_signal.connect([fuck = std::make_shared<item>(&test)]() {

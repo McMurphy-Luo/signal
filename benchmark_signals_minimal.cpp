@@ -36,29 +36,29 @@ void BenchMarkBoostConnect(benchmark::State& state) {
 
 BENCHMARK(BenchMarkBoostConnect);
 
-void BenchMarkSignalSimple(benchmark::State& state) {
+void BenchMarkSignalTrigger(benchmark::State& state) {
   int i = 0;
   signals::signal<void, int&> simple_signal;
+  signals::connection conn = simple_signal.connect(SimpleSlot);
   for (auto _ : state) {
-    signals::connection conn = simple_signal.connect(SimpleSlot);
     simple_signal(i);
   }
   benchmark::DoNotOptimize(i);
 }
 
-BENCHMARK(BenchMarkSignalSimple);
+BENCHMARK(BenchMarkSignalTrigger);
 
-void BenchMarkBoostSimple(benchmark::State& state) {
+void BenchMarkBoostTrigger(benchmark::State& state) {
   int i = 0;
   boost::signals2::signal<void(int&)> simple_signal;
+  boost::signals2::connection conn = simple_signal.connect(SimpleSlot);
   for (auto _ : state) {
-    boost::signals2::connection conn = simple_signal.connect(SimpleSlot);
     simple_signal(i);
   }
   benchmark::DoNotOptimize(i);
 }
 
-BENCHMARK(BenchMarkBoostSimple);
+BENCHMARK(BenchMarkBoostTrigger);
 
 class TestClass {
 public:
@@ -69,29 +69,24 @@ void TestClass::Test(int& i) {
   ++i;
 }
 
-void BenchMarkSignalClassMemberFunction(benchmark::State& state) {
-  int i = 0;
+void BenchMarkSignalConnectClassMemberFunction(benchmark::State& state) {
+  signals::signal<void, int> simple_signal;
   for (auto _ : state) {
     TestClass obj;
-    signals::signal<void, int> simple_signal;
-    signals::connection conn = simple_signal.connect(&obj, &TestClass::Test);
-    simple_signal(i);
-  }
-  benchmark::DoNotOptimize(i);
-}
-
-BENCHMARK(BenchMarkSignalClassMemberFunction);
-
-void BenchMarkBoostClassMemberFunction(benchmark::State& state) {
-  for (auto _ : state) {
-    TestClass obj;
-    boost::signals2::signal<void(int&)> simple_signal;
-    boost::signals2::connection conn = simple_signal.connect(boost::bind(&TestClass::Test, &obj, boost::placeholders::_1));
-    int i = 2;
-    simple_signal(i);
+    simple_signal.connect(&obj, &TestClass::Test);
   }
 }
 
-BENCHMARK(BenchMarkBoostClassMemberFunction);
+BENCHMARK(BenchMarkSignalConnectClassMemberFunction);
+
+void BenchMarkBoostConnectClassMemberFunction(benchmark::State& state) {
+  boost::signals2::signal<void(int&)> simple_signal;
+  for (auto _ : state) {
+    TestClass obj;
+    simple_signal.connect(boost::bind(&TestClass::Test, &obj, boost::placeholders::_1));
+  }
+}
+
+BENCHMARK(BenchMarkBoostConnectClassMemberFunction);
 
 BENCHMARK_MAIN();
