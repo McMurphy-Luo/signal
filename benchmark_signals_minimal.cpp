@@ -18,6 +18,15 @@ void BenchMarkZero(benchmark::State& state) {
 
 BENCHMARK(BenchMarkZero);
 
+void BenchMarkSharedPtr(benchmark::State& state) {
+  for (auto _ : state) {
+    std::shared_ptr<int> test = std::make_shared<int>(5);
+    benchmark::DoNotOptimize(test);
+  }
+}
+
+BENCHMARK(BenchMarkSharedPtr);
+
 void BenchMarkSignalConnect(benchmark::State& state) {
   signals::signal<void, int&> simple_signal;
   for (auto _ : state) {

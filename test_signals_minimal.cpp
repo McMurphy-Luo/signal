@@ -220,7 +220,9 @@ TEST_CASE("Test disconnect during iterating") {
     signals::connection conn_10 = test_simple_signal.connect([] {});
     signals::signal<void>::const_iterator it = test_simple_signal.begin();
     while (it != test_simple_signal.end()) {
-      (*it)();
+      if (*it) {
+        (*it)();
+      }
       ++it;
     }
   }
@@ -272,7 +274,7 @@ struct item {
 TEST_CASE("Test slot resource management and termination") {
   signals::signal<void> test_signal;
   int test = 0;
-  signals::connection conn = test_signal.connect([fuck = std::make_shared<item>(&test)]() {
+  signals::connection conn = test_signal.connect([obj = std::make_shared<item>(&test)]() {
 
   });
   conn.disconnect();
