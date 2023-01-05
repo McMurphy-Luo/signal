@@ -220,7 +220,9 @@ TEST_CASE("Test disconnect during iterating") {
     signals::connection conn_10 = test_simple_signal.connect([] {});
     signals::signal<void>::const_iterator it = test_simple_signal.begin();
     while (it != test_simple_signal.end()) {
-      (*it)();
+      if (*it) {
+        (*it)();
+      }
       ++it;
     }
   }

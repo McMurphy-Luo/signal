@@ -67,37 +67,19 @@ namespace signals
       using pointer = std::function<R(T...)>*;
       using reference = std::function<R(T...)>&;
 
-      slot_iterator()
-        : it_()
-        , shared_block_()
-      {
-
-      }
-
       slot_iterator(
         typename std::list<std::shared_ptr<slot_shared_block<R, T...>>>::iterator it,
-        std::shared_ptr<iterator_detail<R, T...>> shared_block
+        std::shared_ptr<iterator_detail<R, T...>>&& shared_block
       )
         : it_(it)
-        , shared_block_(shared_block)
+        , shared_block_(std::move(shared_block))
       {
 
       }
 
       reference operator*() const { return (*it_)->the_function; }
       pointer operator->() const { return &((*it_)->the_function); }
-      slot_iterator& operator++() {
-        do {
-          ++it_;
-          if (it_ == shared_block_->the_signal->slots->connections.end()) {
-            break;
-          }
-          if ((*it_)->the_function) {
-            break;
-          }
-        } while (true);
-        return *this;
-      }
+      slot_iterator& operator++() { ++it_; return *this; }
       slot_iterator operator++(int) { slot_iterator tmp = *this; ++(*this); return tmp; }
       friend bool operator== (const slot_iterator& a, const slot_iterator& b) { return a.it_ == b.it_; }
       friend bool operator!= (const slot_iterator& a, const slot_iterator& b) { return a.it_ != b.it_; }
@@ -116,19 +98,12 @@ namespace signals
       using pointer = const std::function<R(T...)>*;
       using reference = const std::function<R(T...)>&;
 
-      slot_const_iterator()
-        : it_()
-        , shared_block_()
-      {
-        
-      }
-
       slot_const_iterator(
         typename std::list<std::shared_ptr<slot_shared_block<R, T...>>>::const_iterator it,
-        std::shared_ptr<iterator_detail<R, T...>> shared_block
+        std::shared_ptr<iterator_detail<R, T...>>&& shared_block
       )
         : it_(it)
-        , shared_block_(shared_block)
+        , shared_block_(std::move(shared_block))
       {
 
       }
@@ -142,18 +117,7 @@ namespace signals
 
       reference operator*() const { return (*it_)->the_function; }
       pointer operator->() const { return &((*it_)->the_function); }
-      slot_const_iterator& operator++() {
-        do {
-          ++it_;
-          if (it_ == shared_block_->the_signal->slots->connections.end()) {
-            break;
-          }
-          if ((*it_)->the_function) {
-            break;
-          }
-        } while (true);
-        return *this;
-      }
+      slot_const_iterator& operator++() { ++it_; return *this; }
       slot_const_iterator operator++(int) { slot_const_iterator tmp = *this; ++(*this); return tmp; }
       friend bool operator== (const slot_const_iterator& a, const slot_const_iterator& b) { return a.it_ == b.it_; }
       friend bool operator!= (const slot_const_iterator& a, const slot_const_iterator& b) { return a.it_ != b.it_; }
@@ -202,7 +166,7 @@ namespace signals
     };
   }
 
-  class connection {
+  class connection final {
   public:
     connection()
       : connection_detail_() {
@@ -272,7 +236,7 @@ namespace signals
   }
 
   template<typename R, typename... T>
-  class signal {
+  class signal final {
   public:
     using iterator = detail::slot_iterator<R, T...>;
     using const_iterator = detail::slot_const_iterator<R, T...>;
@@ -307,7 +271,7 @@ namespace signals
         shared_block = std::make_shared<detail::iterator_detail<R, T...>>(signal_detail_);
         iterator_detail_ = shared_block;
       }
-      return iterator(signal_detail_->slots->connections.begin(), shared_block);
+      return iterator(signal_detail_->slots->connections.begin(), std::move(shared_block));
     }
 
     iterator end() {
@@ -316,7 +280,7 @@ namespace signals
         shared_block = std::make_shared<detail::iterator_detail<R, T...>>(signal_detail_);
         iterator_detail_ = shared_block;
       }
-      return iterator(signal_detail_->slots->connections.end(), shared_block);
+      return iterator(signal_detail_->slots->connections.end(), std::move(shared_block));
     }
 
     const_iterator cbegin() {
@@ -325,7 +289,7 @@ namespace signals
         shared_block = std::make_shared<detail::iterator_detail<R, T...>>(signal_detail_);
         iterator_detail_ = shared_block;
       }
-      return const_iterator(signal_detail_->slots->connections.begin(), shared_block);
+      return const_iterator(signal_detail_->slots->connections.begin(), std::move(shared_block));
     }
 
     const_iterator cend() {
@@ -334,7 +298,7 @@ namespace signals
         shared_block = std::make_shared<detail::iterator_detail<R, T...>>(signal_detail_);
         iterator_detail_ = shared_block;
       }
-      return const_iterator(signal_detail_->slots->connections.end(), shared_block);
+      return const_iterator(signal_detail_->slots->connections.end(), std::move(shared_block));
     }
 
     connection connect(const std::function<R (T...)>& the_function) {
@@ -367,9 +331,11 @@ namespace signals
     }
 
     void operator()(T... param) {
-      const_iterator it = begin();
-      while (it != end()) {
-        (*it)(param...);
+      const_iterator it = cbegin();
+      while (it != cend()) {
+        if (*it) {
+          (*it)(param...);
+        }
         ++it;
       }
     }
