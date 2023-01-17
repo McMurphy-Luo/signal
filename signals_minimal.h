@@ -247,6 +247,11 @@ namespace signals
     return bind(obj, member_fn, std::make_integer_sequence<int, sizeof...(Types)>());
   }
 
+  template<typename A, typename B, size_t... I>
+  constexpr bool contains(std::index_sequence<I...>) {
+    return std::conjunction_v<std::is_same<std::tuple_element_t<I, A>, std::tuple_element_t<I, B>>...>;
+  }
+
   template<typename R, typename... T>
   class signal final {
   public:
@@ -343,7 +348,7 @@ namespace signals
       the_block->the_function = the_function;
       connection_detail->the_shared_block = the_block;
       connection_detail->the_signal = signal_detail_;
-      signal_detail_->connections.push_back(the_block);
+      signal_detail_->connections.push_back(std::move(the_block));
       connection result(std::move(connection_detail));
       return result;
     }
@@ -357,13 +362,15 @@ namespace signals
       the_block->the_function = std::move(the_function);
       connection_detail->the_shared_block = the_block;
       connection_detail->the_signal = signal_detail_;
-      signal_detail_->connections.push_back(the_block);
+      signal_detail_->connections.push_back(std::move(the_block));
       connection result(std::move(connection_detail));
       return result;
     }
 
     template<typename C, typename... V>
     connection connect(C* obj, R(C::*member_function)(V...)) {
+      static_assert(sizeof...(T) >= sizeof...(V));
+      static_assert(contains<std::tuple<T...>, std::tuple<V...>>(std::make_index_sequence<sizeof...(V)>{}));
       return connect([binder = bind(obj, member_function)](T... params) -> R {
         return invoke(binder, params...);
       });

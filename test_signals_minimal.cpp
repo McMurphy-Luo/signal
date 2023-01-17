@@ -24,8 +24,11 @@
 namespace {
   class TestClass {
   public:
-    void Increment() { ++called_times_; }
+    void SetValue(int value) { value_ = value; ++called_times_; }
 
+    void GetValue(int& target) { target = value_; ++called_times_; }
+
+    int value_ = 0;
     int called_times_ = 0;
   };
 }
@@ -53,13 +56,27 @@ TEST_CASE("Test no arguments signal") {
 
 TEST_CASE("Test class member function for slot") {
   TestClass obj;
-  signals::signal<void> signal_no_arguments;
-  signals::connection conn = signal_no_arguments.connect(&obj, &TestClass::Increment);
-  signal_no_arguments();
+  signals::signal<void, int> signal_no_arguments;
+  signals::connection conn = signal_no_arguments.connect(&obj, &TestClass::SetValue);
+  signal_no_arguments(5);
   CHECK(obj.called_times_ == 1);
+  CHECK(obj.value_ == 5);
   conn.disconnect();
-  signal_no_arguments();
+  signal_no_arguments(4);
   CHECK(obj.called_times_ == 1);
+  CHECK(obj.value_ == 5);
+  conn = signal_no_arguments.connect(&obj, &TestClass::SetValue);
+  signal_no_arguments(89);
+  CHECK(obj.called_times_ == 2);
+  CHECK(obj.value_ == 89);
+  signals::signal<void, int&, std::string> signal_get_value;
+  signals::connection conn_2 = signal_get_value.connect(&obj, &TestClass::GetValue);
+  int output = -1;
+  std::string test_str("test");
+  signal_get_value(output, test_str);
+  CHECK(test_str == "test");
+  CHECK(output == 89);
+  CHECK(obj.called_times_ == 3);
 }
 
 TEST_CASE("Test boost disconnect during execution") {
@@ -281,4 +298,17 @@ TEST_CASE("Test slot resource management and termination") {
   conn = test_signal.connect(item(&test));
   conn.disconnect();
   CHECK(test == 0);
+}
+
+class Foo {
+public:
+  void foo(int, const long&) {
+    
+  }
+};
+
+TEST_CASE("Test connect class member function") {
+  signals::signal<void, int, const long&, long> signal;
+  Foo foo_instance;
+  signal.connect(&foo_instance, &Foo::foo);
 }
