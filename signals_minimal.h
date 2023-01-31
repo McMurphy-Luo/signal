@@ -43,7 +43,6 @@ namespace signals
         }
         if (signal->flags & signal_detail<R, T...>::kDirty) {
           typename std::list<std::shared_ptr<slot_shared_block<R, T...>>>::iterator it_slot = signal->connections.begin();
-          it_slot = signal->connections.begin();
           while (it_slot != signal->connections.end()) {
             if (!((*it_slot)->the_function)) {
               it_slot = signal->connections.erase(it_slot);
@@ -186,6 +185,52 @@ namespace signals
         the_shared_block.reset();
       }
     };
+
+    template <std::size_t... Is, typename F, typename Tuple>
+    auto invoke_impl(int, std::index_sequence<Is...>, F&& func, Tuple&& args)
+      -> decltype(std::forward<F>(func)(std::get<Is>(std::forward<Tuple>(args))...))
+    {
+      return std::forward<F>(func)(std::get<Is>(std::forward<Tuple>(args))...);
+    }
+
+    template <std::size_t... Is, typename F, typename Tuple>
+    decltype(auto) invoke_impl(char, std::index_sequence<Is...>, F&& func, Tuple&& args)
+    {
+      return invoke_impl(0
+        , std::index_sequence<Is..., sizeof...(Is)>{}
+      , std::forward<F>(func)
+        , std::forward<Tuple>(args));
+    }
+
+    template <typename F, typename... Args>
+    decltype(auto) invoke(F&& func, Args&&... args)
+    {
+      return invoke_impl(0
+        , std::index_sequence<>{}
+      , std::forward<F>(func)
+        , std::forward_as_tuple(std::forward<Args>(args)...));
+    }
+
+    template<typename A, typename B, size_t... I>
+    constexpr bool contains(std::index_sequence<I...>) {
+      return std::conjunction_v<std::is_same<std::tuple_element_t<I, A>, std::tuple_element_t<I, B>>...>;
+    }
+  }
+
+  template<int N>
+  struct placeholder { static placeholder ph; };
+
+  template<int N>
+  placeholder<N> placeholder<N>::ph;
+
+  template<class R, class T, class...Types, int... indices>
+  std::function<R(Types...)> bind(T* obj, R(T::* member_fn)(Types...), std::integer_sequence<int, indices...> /*seq*/) {
+    return std::bind(std::mem_fn(member_fn), obj, placeholder<indices + 1>::ph...);
+  }
+
+  template<class R, class T, class...Types>
+  std::function<R(Types...)> bind(T* obj, R(T::* member_fn)(Types...)) {
+    return bind(obj, member_fn, std::make_integer_sequence<int, sizeof...(Types)>());
   }
 
   class connection final {
@@ -205,52 +250,6 @@ namespace signals
   private:
     std::unique_ptr<detail::connection_internal_base> connection_detail_;
   };
-
-  template <std::size_t... Is, typename F, typename Tuple>
-  auto invoke_impl(int, std::index_sequence<Is...>, F&& func, Tuple&& args)
-    -> decltype(std::forward<F>(func)(std::get<Is>(std::forward<Tuple>(args))...))
-  {
-    return std::forward<F>(func)(std::get<Is>(std::forward<Tuple>(args))...);
-  }
-
-  template <std::size_t... Is, typename F, typename Tuple>
-  decltype(auto) invoke_impl(char, std::index_sequence<Is...>, F&& func, Tuple&& args)
-  {
-    return invoke_impl(0
-      , std::index_sequence<Is..., sizeof...(Is)>{}
-      , std::forward<F>(func)
-      , std::forward<Tuple>(args));
-  }
-
-  template <typename F, typename... Args>
-  decltype(auto) invoke(F&& func, Args&&... args)
-  {
-    return invoke_impl(0
-      , std::index_sequence<>{}
-      , std::forward<F>(func)
-      , std::forward_as_tuple(std::forward<Args>(args)...));
-  }
-
-  template<int N>
-  struct placeholder { static placeholder ph; };
-
-  template<int N>
-  placeholder<N> placeholder<N>::ph;
-
-  template<class R, class T, class...Types, int... indices>
-  std::function<R(Types...)> bind(T* obj, R(T::* member_fn)(Types...), std::integer_sequence<int, indices...> /*seq*/) {
-    return std::bind(std::mem_fn(member_fn), obj, placeholder<indices + 1>::ph...);
-  }
-
-  template<class R, class T, class...Types>
-  std::function<R(Types...)> bind(T* obj, R(T::* member_fn)(Types...)) {
-    return bind(obj, member_fn, std::make_integer_sequence<int, sizeof...(Types)>());
-  }
-
-  template<typename A, typename B, size_t... I>
-  constexpr bool contains(std::index_sequence<I...>) {
-    return std::conjunction_v<std::is_same<std::tuple_element_t<I, A>, std::tuple_element_t<I, B>>...>;
-  }
 
   template<typename R, typename... T>
   class signal final {
@@ -370,9 +369,9 @@ namespace signals
     template<typename C, typename... V>
     connection connect(C* obj, R(C::*member_function)(V...)) {
       static_assert(sizeof...(T) >= sizeof...(V));
-      static_assert(contains<std::tuple<T...>, std::tuple<V...>>(std::make_index_sequence<sizeof...(V)>{}));
+      static_assert(detail::contains<std::tuple<T...>, std::tuple<V...>>(std::make_index_sequence<sizeof...(V)>{}));
       return connect([binder = bind(obj, member_function)](T... params) -> R {
-        return invoke(binder, params...);
+        return detail::invoke(binder, params...);
       });
     }
 

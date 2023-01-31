@@ -62,10 +62,10 @@ BENCHMARK(BenchMarkBoostTrigger);
 
 class TestClass {
 public:
-  void Test(int& i);
+  void Test(int i);
 };
 
-void TestClass::Test(int& i) {
+void TestClass::Test(int i) {
   ++i;
 }
 
