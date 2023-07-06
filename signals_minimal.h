@@ -28,20 +28,69 @@ namespace signals
     };
 
     template<typename R, typename... T>
-    struct iterator_detail {
-      std::weak_ptr<signal_detail<R, T...>> the_signal;
+    class signal_lock {
+    public:
+      signal_lock() {
 
-      iterator_detail(std::shared_ptr<signal_detail<R, T...>> signal)
-        : the_signal(signal) {
-        signal->flags |= signal_detail<R, T...>::kLocked;
       }
 
-      ~iterator_detail() {
-        std::shared_ptr<signal_detail<R, T...>> signal = the_signal.lock();
+      explicit signal_lock(std::shared_ptr<signal_detail<R, T...>> signal)
+        : signal(signal) {
+        increment_lock();
+      }
+
+      signal_lock(const signal_lock& rhs)
+        : signal(rhs.signal)
+      {
+        increment_lock();
+      }
+
+      signal_lock& operator=(const signal_lock& rhs) {
+        if (&rhs == this) {
+          return *this;
+        }
+        decrement_lock();
+        signal = rhs.signal;
+        increment_lock();
+        return *this;
+      }
+
+      signal_lock(signal_lock&& rhs) noexcept
+        : signal(std::move(rhs.signal))
+      {
+
+      }
+
+      signal_lock& operator=(signal_lock&& rhs) noexcept {
+        decrement_lock();
+        signal = std::move(rhs.signal);
+        return *this;
+      }
+
+      ~signal_lock() {
+        decrement_lock();
+      }
+
+    private:
+      void increment_lock() {
         if (!signal) {
           return;
         }
-        if (signal->flags & signal_detail<R, T...>::kDirty) {
+        if (signal->locks >= 0) {
+          signal->locks += 1;
+        } else {
+          signal->locks -= 1;
+        }
+      }
+
+      void decrement_lock() {
+        if (!signal) {
+          return;
+        }
+        assert(signal->locks != 0);
+        bool dirty = (signal->locks < 0);
+        signal->locks += dirty ? 1 : -1;
+        if (signal->locks == 0 && dirty) {
           typename std::list<std::shared_ptr<slot_shared_block<R, T...>>>::iterator it_slot = signal->connections.begin();
           while (it_slot != signal->connections.end()) {
             if (!((*it_slot)->the_function)) {
@@ -51,9 +100,10 @@ namespace signals
             }
           }
         }
-        signal->flags &= ~(signal_detail<R, T...>::kDirty);
-        signal->flags &= ~(signal_detail<R, T...>::kLocked);
       }
+
+    private:
+      std::shared_ptr<signal_detail<R, T...>> signal;
     };
 
     template<typename R, typename... T>
@@ -70,12 +120,19 @@ namespace signals
       using pointer = std::function<R(T...)>*;
       using reference = std::function<R(T...)>&;
 
+      slot_iterator()
+        : it_()
+        , locker_()
+      {
+
+      }
+
       slot_iterator(
         typename std::list<std::shared_ptr<slot_shared_block<R, T...>>>::iterator it,
-        std::shared_ptr<iterator_detail<R, T...>>&& shared_block
+        signal_lock<R, T...>&& locker
       )
         : it_(it)
-        , shared_block_(std::move(shared_block))
+        , locker_(std::move(locker))
       {
 
       }
@@ -89,7 +146,7 @@ namespace signals
 
     private:
       typename std::list<std::shared_ptr<slot_shared_block<R, T...>>>::iterator it_;
-      std::shared_ptr<iterator_detail<R, T...>> shared_block_;
+      signal_lock<R, T...> locker_;
     };
 
     template<typename R, typename... T>
@@ -102,39 +159,46 @@ namespace signals
       using pointer = const std::function<R(T...)>*;
       using reference = const std::function<R(T...)>&;
 
+      slot_const_iterator() 
+        : it_()
+        , locker_()
+      {
+
+      }
+
       slot_const_iterator(
         typename std::list<std::shared_ptr<slot_shared_block<R, T...>>>::const_iterator it,
-        std::shared_ptr<iterator_detail<R, T...>>&& shared_block
+        signal_lock<R, T...>&& locker
       )
         : it_(it)
-        , shared_block_(std::move(shared_block))
+        , locker_(std::move(locker))
       {
 
       }
 
       slot_const_iterator(const slot_iterator<R, T...>& non_const_it)
         : it_(non_const_it.it_)
-        , shared_block_(non_const_it.shared_block_)
+        , locker_(non_const_it.locker_)
       {
 
       }
 
       slot_const_iterator(slot_iterator<R, T...>&& non_const_it) noexcept
         : it_(non_const_it.it_)
-        , shared_block_(std::move(non_const_it.shared_block_))
+        , locker_(std::move(non_const_it.locker_))
       {
 
       }
 
       slot_const_iterator& operator=(const slot_iterator<R, T...>& non_const_it) {
         it_ = non_const_it.it_;
-        shared_block_ = non_const_it.shared_block_;
+        locker_ = non_const_it.locker_;
         return *this;
       }
 
       slot_const_iterator& operator=(slot_iterator<R, T...>&& non_const_it) noexcept {
         it_ = non_const_it.it_;
-        shared_block_ = std::move(non_const_it.shared_block_);
+        locker_ = std::move(non_const_it.locker_);
         return *this;
       }
 
@@ -147,16 +211,19 @@ namespace signals
 
     private:
       typename std::list<std::shared_ptr<slot_shared_block<R, T...>>>::const_iterator it_;
-      std::shared_ptr<iterator_detail<R, T...>> shared_block_;
+      signal_lock<R, T...> locker_;
     };
 
     template<typename R, typename... T>
     struct signal_detail {
-      static constexpr std::int_fast8_t kLocked = 0x1;
-      static constexpr std::int_fast8_t kDirty = 0x2;
       std::list<std::shared_ptr<slot_shared_block<R, T...>>> connections;
-      std::int_fast8_t flags;
+      long locks = 0;
     };
+
+    template<typename R, typename... T>
+    void signal_creator(std::shared_ptr<detail::signal_detail<R, T...>>& receiver) {
+      receiver = std::make_shared<detail::signal_detail<R, T...>>();
+    }
 
     template<typename R, typename... T>
     struct signal_slot_connection : public connection_internal_base {
@@ -171,10 +238,11 @@ namespace signals
         std::shared_ptr<signal_detail<R, T...>> signal = the_signal.lock();
         if (!signal) {
           the_shared_block.reset();
+          the_signal.reset();
           return;
         }
-        if (signal->flags & signal_detail<R, T...>::kLocked) {
-          signal->flags |= signal_detail<R, T...>::kDirty; // We mark signal dirty. Invalid function will be erased after during signal execution
+        if (signal->locks != 0) {
+          signal->locks = (signal->locks) > 0 ? (-signal->locks) : (signal->locks);
         } else {
           typename std::list<std::shared_ptr<slot_shared_block<R, T...>>>::const_iterator it =
             std::find(signal->connections.begin(), signal->connections.end(), the_shared_block);
@@ -183,6 +251,7 @@ namespace signals
           }
         }
         the_shared_block.reset();
+        the_signal.reset();
       }
     };
 
@@ -198,7 +267,7 @@ namespace signals
     {
       return invoke_impl(0
         , std::index_sequence<Is..., sizeof...(Is)>{}
-      , std::forward<F>(func)
+        , std::forward<F>(func)
         , std::forward<Tuple>(args));
     }
 
@@ -207,7 +276,7 @@ namespace signals
     {
       return invoke_impl(0
         , std::index_sequence<>{}
-      , std::forward<F>(func)
+        , std::forward<F>(func)
         , std::forward_as_tuple(std::forward<Args>(args)...));
     }
 
@@ -240,7 +309,7 @@ namespace signals
 
     }
 
-    connection(std::unique_ptr<detail::connection_internal_base>&& connection_internal_detail)
+    explicit connection(std::unique_ptr<detail::connection_internal_base>&& connection_internal_detail)
       : connection_detail_(std::move(connection_internal_detail)) {
 
     }
@@ -257,91 +326,52 @@ namespace signals
     using iterator = detail::slot_iterator<R, T...>;
     using const_iterator = detail::slot_const_iterator<R, T...>;
 
-    signal() {}
+    signal() = default;
 
     signal(const signal&) = delete;
 
     signal& operator=(const signal&) = delete;
 
-    signal(signal&& another) noexcept
-      : signal_detail_(std::move(another.signal_detail_))
-      , iterator_detail_(std::move(another.iterator_detail_)) {
+    signal(signal&& rhs) noexcept
+      : signal_detail_(std::move(rhs.signal_detail_))
+      , signal_creator_(rhs.signal_creator_)
+    {
 
     }
 
     signal& operator=(signal&& rhs) noexcept {
-      if (this == &rhs) {
-        return *this;
-      }
       signal_detail_ = std::move(rhs.signal_detail_);
-      iterator_detail_ = std::move(rhs.iterator_detail_);
+      signal_creator_ = rhs.signal_creator_;
       return *this;
     }
 
     iterator begin() {
-      if (!signal_detail_) {
-        signal_detail_ = std::make_shared<detail::signal_detail<R, T...>>();
-      }
-      std::shared_ptr<detail::iterator_detail<R, T...>> shared_block = iterator_detail_.lock();
-      if (!shared_block) {
-        shared_block = std::make_shared<detail::iterator_detail<R, T...>>(signal_detail_);
-        iterator_detail_ = shared_block;
-      }
-      return iterator(signal_detail_->connections.begin(), std::move(shared_block));
+      create_shared_block();
+      return iterator(signal_detail_->connections.begin(), detail::signal_lock<R, T...>(signal_detail_));
     }
 
     iterator end() {
-      if (!signal_detail_) {
-        signal_detail_ = std::make_shared<detail::signal_detail<R, T...>>();
-      }
-      std::shared_ptr<detail::iterator_detail<R, T...>> shared_block = iterator_detail_.lock();
-      if (!shared_block) {
-        shared_block = std::make_shared<detail::iterator_detail<R, T...>>(signal_detail_);
-        iterator_detail_ = shared_block;
-      }
-      return iterator(signal_detail_->connections.end(), std::move(shared_block));
+      create_shared_block();
+      return iterator(signal_detail_->connections.end(), detail::signal_lock<R, T...>(signal_detail_));
     }
 
     const_iterator cbegin() {
-      if (!signal_detail_) {
-        signal_detail_ = std::make_shared<detail::signal_detail<R, T...>>();
-      }
-      std::shared_ptr<detail::iterator_detail<R, T...>> shared_block = iterator_detail_.lock();
-      if (!shared_block) {
-        shared_block = std::make_shared<detail::iterator_detail<R, T...>>(signal_detail_);
-        iterator_detail_ = shared_block;
-      }
-      return const_iterator(signal_detail_->connections.cbegin(), std::move(shared_block));
+      create_shared_block();
+      return const_iterator(signal_detail_->connections.cbegin(), detail::signal_lock<R, T...>(signal_detail_));
     }
 
     const_iterator cend() {
-      if (!signal_detail_) {
-        signal_detail_ = std::make_shared<detail::signal_detail<R, T...>>();
-      }
-      std::shared_ptr<detail::iterator_detail<R, T...>> shared_block = iterator_detail_.lock();
-      if (!shared_block) {
-        shared_block = std::make_shared<detail::iterator_detail<R, T...>>(signal_detail_);
-        iterator_detail_ = shared_block;
-      }
-      return const_iterator(signal_detail_->connections.cend(), std::move(shared_block));
+      create_shared_block();
+      return const_iterator(signal_detail_->connections.cend(), detail::signal_lock<R, T...>(signal_detail_));
     }
 
     const_iterator erase(const_iterator it) {
-      if (!signal_detail_) {
-        signal_detail_ = std::make_shared<detail::signal_detail<R, T...>>();
-      }
-      std::shared_ptr<detail::iterator_detail<R, T...>> shared_block = iterator_detail_.lock();
-      if (!shared_block) {
-        shared_block = std::make_shared<detail::iterator_detail<R, T...>>(signal_detail_);
-        iterator_detail_ = shared_block;
-      }
-      return const_iterator(signal_detail_->connections.erase(it.it_), std::move(shared_block));
+      create_shared_block();
+      return const_iterator(signal_detail_->connections.erase(it.it_), detail::signal_lock<R, T...>(signal_detail_));
     }
 
     connection connect(const std::function<R (T...)>& the_function) {
-      if (!signal_detail_) {
-        signal_detail_ = std::make_shared<detail::signal_detail<R, T...>>();
-      }
+      create_shared_block();
       std::unique_ptr<detail::signal_slot_connection<R, T...>> connection_detail(new detail::signal_slot_connection<R, T...>());
       std::shared_ptr<detail::slot_shared_block<R, T...>> the_block(std::make_shared<detail::slot_shared_block<R, T...>>());
       the_block->the_function = the_function;
@@ -353,9 +383,7 @@ namespace signals
     }
 
     connection connect(std::function<R(T...)>&& the_function) {
-      if (!signal_detail_) {
-        signal_detail_ = std::make_shared<detail::signal_detail<R, T...>>();
-      }
+      create_shared_block();
       std::unique_ptr<detail::signal_slot_connection<R, T...>> connection_detail(new detail::signal_slot_connection<R, T...>());
       std::shared_ptr<detail::slot_shared_block<R, T...>> the_block(std::make_shared<detail::slot_shared_block<R, T...>>());
       the_block->the_function = std::move(the_function);
@@ -366,16 +394,28 @@ namespace signals
       return result;
     }
 
+    template<typename C>
+    connection connect(C* obj, R(C::* member_function)(T...)) {
+      return connect(
+        [=](T... args) -> R {
+          return (obj->*member_function)(args...);
+        }
+      );
+    }
+
     template<typename C, typename... V>
     connection connect(C* obj, R(C::*member_function)(V...)) {
-      static_assert(sizeof...(T) >= sizeof...(V));
-      static_assert(detail::contains<std::tuple<T...>, std::tuple<V...>>(std::make_index_sequence<sizeof...(V)>{}));
+      static_assert(sizeof...(T) >= sizeof...(V), "Cannot connect a slot that receive arguments more than signal can provide");
+      static_assert(detail::contains<std::tuple<T...>, std::tuple<V...>>(std::make_index_sequence<sizeof...(V)>{}), "The function parameter signature that a slot accepts must match the signature of the signal");
       return connect([binder = bind(obj, member_function)](T... params) -> R {
         return detail::invoke(binder, params...);
       });
     }
 
     void operator()(T... param) {
+      if (!signal_detail_) {
+        return;
+      }
       const_iterator it = cbegin();
       while (it != cend()) {
         if (*it) {
@@ -388,8 +428,15 @@ namespace signals
     }
 
   private:
+    void create_shared_block() {
+      if (!signal_detail_) {
+        signal_creator_(signal_detail_);
+      }
+    }
+
+  private:
     std::shared_ptr<detail::signal_detail<R, T...>> signal_detail_;
-    std::weak_ptr<detail::iterator_detail<R, T...>> iterator_detail_;
+    decltype(detail::signal_creator<R, T...>)* const signal_creator_ = &detail::signal_creator;
   };
 }
 

@@ -18,6 +18,23 @@ void BenchMarkZero(benchmark::State& state) {
 
 BENCHMARK(BenchMarkZero);
 
+void BenchMarkSimpleNewFree(benchmark::State& state) {
+  for (auto _ : state) {
+    int* p_test = new int{ 5 };
+    delete p_test;
+  }
+}
+
+BENCHMARK(BenchMarkSimpleNewFree);
+
+void BenchMarkSharedPtr(benchmark::State& state) {
+  for (auto _ : state) {
+    std::make_shared<int>(5);
+  }
+}
+
+BENCHMARK(BenchMarkSharedPtr);
+
 void BenchMarkSignalConnect(benchmark::State& state) {
   signals::signal<void, int&> simple_signal;
   for (auto _ : state) {

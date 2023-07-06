@@ -11,6 +11,7 @@
 #define DBG_NEW new ( _NORMAL_BLOCK , __FILE__ , __LINE__ )
 // Replace _NORMAL_BLOCK with _CLIENT_BLOCK if you want the
 // allocations to be of _CLIENT_BLOCK type
+#define private public
 #endif // _DEBUG
 
 #include "catch.hpp"
@@ -155,9 +156,17 @@ TEST_CASE("Test signal iterator 1") {
     return x - 3;
   });
   signals::signal<int, int>::const_iterator it = signal_simple.begin();
+  CHECK(signal_simple.signal_detail_->locks == 1);
   CHECK((*it)(5) == 6);
   CHECK(it != signal_simple.end());
   ++it;
+  CHECK(signal_simple.signal_detail_->locks == 1);
+  signal_simple.begin();
+  CHECK(signal_simple.signal_detail_->locks == 1);
+  signal_simple.cbegin();
+  CHECK(signal_simple.signal_detail_->locks == 1);
+  signal_simple.cend();
+  CHECK(signal_simple.signal_detail_->locks == 1);
   CHECK((*it)(5) == 10);
   CHECK(it != signal_simple.begin());
   CHECK(it != signal_simple.end());
@@ -170,7 +179,11 @@ TEST_CASE("Test signal iterator 1") {
   signals::connection conn = signal_simple_2.connect([](int x) -> int {
     return x * x;
   });
+  CHECK(signal_simple_2.signal_detail_->locks == 0);
+  CHECK(signal_simple.signal_detail_->locks == 1);
   it = signal_simple_2.begin();
+  CHECK(signal_simple.signal_detail_->locks == 0);
+  CHECK(signal_simple_2.signal_detail_->locks == 1);
   CHECK((*it)(5) == 25);
   ++it;
   CHECK(it == signal_simple_2.end());
@@ -201,6 +214,57 @@ TEST_CASE("Test signal iterator 2") {
     ++it;
   }
   CHECK(init == 13);
+}
+
+TEST_CASE("Test signal iteerator three") {
+  int test = 5;
+  {
+    signals::signal<void, int&>::const_iterator iter;
+    {
+      signals::signal<void, int&> test_signal;
+      signals::connection conn = test_signal.connect([](int& i) { return i = i + 1; });
+      iter = test_signal.begin();
+      while (iter != test_signal.end()) {
+        if (*iter) {
+          (*iter)(test);
+        }
+        ++iter;
+      }
+    }
+  }
+  CHECK(test == 6);
+  {
+    signals::signal<void, int&> test_signal;
+    {
+      signals::signal<void, int&>::iterator it;
+      signals::signal<void, int&>::const_iterator const_it = it;
+      signals::connection conn = test_signal.connect([](int& i) { return i = i + 1; });
+      it = test_signal.begin();
+      while (it != test_signal.end()) {
+        if (*it) {
+          (*it)(test);
+        }
+        ++it;
+      }
+      CHECK(test_signal.signal_detail_->locks == 1);
+      const_it = it;
+      CHECK(test_signal.signal_detail_->locks == 2);
+      CHECK(test == 7);
+      CHECK(const_it == test_signal.end());
+      const_it = test_signal.begin();
+      while (const_it != test_signal.end()) {
+        if (*const_it) {
+          (*const_it)(test);
+        }
+        ++const_it;
+      }
+      CHECK(test == 8);
+      CHECK(it == test_signal.end());
+      CHECK(const_it == test_signal.end());
+      CHECK(it == const_it);
+    }
+    CHECK(test_signal.signal_detail_->locks == 0);
+  }
 }
 
 TEST_CASE("Test signal iterator stl compatibility") {
@@ -243,7 +307,6 @@ TEST_CASE("Test disconnect during iterating") {
       ++it;
     }
   }
-  int i = 5;
 }
 
 TEST_CASE("Test boost disconnect during iterating") {
