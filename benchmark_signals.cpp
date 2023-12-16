@@ -1,6 +1,6 @@
 #include <cassert>
 #include <iostream>
-#include "signals_minimal.h"
+#include "signals.h"
 #include "boost/signals2.hpp"
 #include "benchmark/benchmark.h"
 
@@ -76,6 +76,34 @@ void BenchMarkBoostTrigger(benchmark::State& state) {
 }
 
 BENCHMARK(BenchMarkBoostTrigger);
+
+void BenchMarkSignalTriggerMultipleSlots(benchmark::State& state) {
+  int i = 0;
+  signals::signal<void, int&> simple_signal;
+  signals::connection conn_1 = simple_signal.connect(SimpleSlot);
+  signals::connection conn_2 = simple_signal.connect(SimpleSlot);
+  signals::connection conn_3 = simple_signal.connect(SimpleSlot);
+  for (auto _ : state) {
+    simple_signal(i);
+  }
+  benchmark::DoNotOptimize(i);
+}
+
+BENCHMARK(BenchMarkSignalTriggerMultipleSlots);
+
+void BenchMarkBoostTriggerMultipleSlots(benchmark::State& state) {
+  int i = 0;
+  boost::signals2::signal<void(int&)> simple_signal;
+  boost::signals2::connection conn_1 = simple_signal.connect(SimpleSlot);
+  boost::signals2::connection conn_2 = simple_signal.connect(SimpleSlot);
+  boost::signals2::connection conn_3 = simple_signal.connect(SimpleSlot);
+  for (auto _ : state) {
+    simple_signal(i);
+  }
+  benchmark::DoNotOptimize(i);
+}
+
+BENCHMARK(BenchMarkBoostTriggerMultipleSlots);
 
 class TestClass {
 public:

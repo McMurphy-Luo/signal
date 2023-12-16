@@ -1,3 +1,8 @@
+/**
+ * @author McMurphy Luo
+ * @description Test cases for a compact version signals
+ */
+
 #ifdef _DEBUG
 #define _CRTDBG_MAP_ALLOC
 #include <stdlib.h>
@@ -6,6 +11,7 @@
 #define DBG_NEW new ( _NORMAL_BLOCK , __FILE__ , __LINE__ )
 // Replace _NORMAL_BLOCK with _CLIENT_BLOCK if you want the
 // allocations to be of _CLIENT_BLOCK type
+#define private public
 #endif // _DEBUG
 
 #include "catch.hpp"
@@ -13,321 +19,360 @@
 #include <cstdio>
 #include <vector>
 #include <sstream>
+#include "boost/signals2.hpp"
+#include "Windows.h"
 
-using std::string;
-using std::function;
-using std::pair;
-using std::make_pair;
-using signals::signal;
-using signals::connection;
-using std::mem_fn;
-using std::ostringstream;
-using std::bind;
-using std::stringstream;
-using std::placeholders::_1;
-using std::placeholders::_2;
-using std::placeholders::_3;
-using std::vector;
+namespace {
+  class TestClass {
+  public:
+    void SetValue(int value) { value_ = value; ++called_times_; }
 
-void Test_SimpleAssign(int input, int& output, int& called_times) {
-  output = input;
-  ++called_times;
+    void GetValue(int& target) { target = value_; ++called_times_; }
+
+    int value_ = 0;
+    int called_times_ = 0;
+  };
 }
 
-void Test_SimplePlusOne(int input, int& output, int& called_times) {
-  output = input + 1;
-  ++called_times;
+TEST_CASE("Test no arguments signal") {
+  signals::signal<void> signal_without_arguments;
+  int slot_called_times = 0;
+  std::function<void()> increment = [&slot_called_times]() {
+    ++slot_called_times;
+  };
+  signals::connection test_conn = signal_without_arguments.connect(increment);
+  signal_without_arguments();
+  CHECK(slot_called_times == 1);
+  test_conn.disconnect();
+  signal_without_arguments();
+  CHECK(slot_called_times == 1);
+  signal_without_arguments.connect(increment);
+  signal_without_arguments();
+  CHECK(slot_called_times == 1);
+  test_conn = signal_without_arguments.connect(increment);
+  signals::connection test_conn2 = signal_without_arguments.connect(increment);
+  signal_without_arguments();
+  CHECK(slot_called_times == 3);
 }
 
-void Test_Multiple_Arguments(int simple_input, string& string_output, int& called_times) {
-  ostringstream string_stream;
-  string_stream << simple_input;
-  string_output = string_stream.str();
-  ++called_times;
+TEST_CASE("Test class member function for slot") {
+  TestClass obj;
+  signals::signal<void, int> signal_no_arguments;
+  signals::connection conn = signal_no_arguments.connect(&obj, &TestClass::SetValue);
+  signal_no_arguments(5);
+  CHECK(obj.called_times_ == 1);
+  CHECK(obj.value_ == 5);
+  conn.disconnect();
+  signal_no_arguments(4);
+  CHECK(obj.called_times_ == 1);
+  CHECK(obj.value_ == 5);
+  conn = signal_no_arguments.connect(&obj, &TestClass::SetValue);
+  signal_no_arguments(89);
+  CHECK(obj.called_times_ == 2);
+  CHECK(obj.value_ == 89);
+  signals::signal<void, int&, std::string> signal_get_value;
+  signals::connection conn_2 = signal_get_value.connect(&obj, &TestClass::GetValue);
+  int output = -1;
+  std::string test_str("test");
+  signal_get_value(output, test_str);
+  CHECK(test_str == "test");
+  CHECK(output == 89);
+  CHECK(obj.called_times_ == 3);
 }
 
-TEST_CASE("Simple test") {
-  signal<void, int, int&, int&> sig;
-  connection temp_connect = sig.connect(&Test_SimpleAssign);
-  int called_times = 0;
-  int output = 0;
-  sig(1, output, called_times);
-  CHECK(output == 1);
-  CHECK(called_times == 1);
+TEST_CASE("Test boost disconnect during execution") {
+  boost::signals2::signal<void()> signal_no_arguments;
+  int slot_0_called_times = 0;
+  boost::signals2::connection conn_0 = signal_no_arguments.connect([&slot_0_called_times, &conn_0]() {
+    ++slot_0_called_times;
+    conn_0.disconnect();
+  });
+  signal_no_arguments();
+  CHECK(slot_0_called_times == 1);
+  signal_no_arguments();
+  CHECK(slot_0_called_times == 1);
+  boost::signals2::connection conn_2;
+  boost::signals2::connection conn_1 = signal_no_arguments.connect([&conn_2]() {
+    conn_2.disconnect();
+    });
+  int slot_2_called_times = 0;
+  conn_2 = signal_no_arguments.connect([&slot_2_called_times]() {
+    ++slot_2_called_times;
+    });
+  signal_no_arguments();
+  CHECK(slot_2_called_times == 0);
 }
 
-TEST_CASE("Connect disconnect test") {
-  signal<void, int, int&, int&> sig;
-  signal<void, int, int&, int&> sig2;
-  connection temp_connect = sig.connect(&Test_SimpleAssign);
-  int output = 0;
-  int called_times = 0;
-  sig(4, output, called_times);
-  CHECK(called_times == 1);
-  CHECK(output == 4);
-  temp_connect.disconnect();
-  sig(3, output, called_times);
-  CHECK(called_times == 1);
-  CHECK(output == 4);
-  temp_connect = sig.connect(&Test_SimpleAssign);
-  sig(5, output, called_times);
-  CHECK(output == 5);
-  CHECK(called_times == 2);
+TEST_CASE("Test signal disconnect during execution") {
+  signals::signal<void> signal_no_arguments;
+  int slot_0_called_times = 0;
+  signals::connection conn_0 = signal_no_arguments.connect([&slot_0_called_times, &conn_0]() {
+    ++slot_0_called_times;
+    conn_0.disconnect();
+  });
+  signal_no_arguments();
+  CHECK(slot_0_called_times == 1);
+  signal_no_arguments();
+  CHECK(slot_0_called_times == 1);
+  signals::connection conn_2;
+  signals::connection conn_1 = signal_no_arguments.connect([&conn_2]() {
+    conn_2.disconnect();
+  });
+  int slot_2_called_times = 0;
+  conn_2 = signal_no_arguments.connect([&slot_2_called_times]() {
+    ++slot_2_called_times;
+  });
+  signal_no_arguments();
+  CHECK(slot_2_called_times == 0);
 }
 
-TEST_CASE("Signal connect signal test") {
-  signal<void, int, int&, int&> sig_1;
-  sig_1.connect(&Test_SimpleAssign);
-  int output = 0;
-  int called_times = 0;
-  sig_1(5, output, called_times);
-  CHECK(called_times == 0);
-  signal<void, int, int&, int&> sig_2;
-  connection conn_sig_slot_1 = sig_1.connect(&Test_SimpleAssign);
-  connection conn_sig_1_sig_2 = sig_1.connect(sig_2);
-  sig_2.connect(&Test_SimpleAssign);
-  sig_1(5, output, called_times);
-  CHECK(called_times == 1);
-  CHECK(output == 5);
-  connection conn_sig_2_slot_1 = sig_2.connect(&Test_SimpleAssign);
-  sig_1(6, output, called_times);
-  CHECK(called_times == 3);
-  CHECK(output == 6);
-  conn_sig_1_sig_2.disconnect();
-  sig_1(7, output, called_times);
-  CHECK(called_times == 4);
-  assert(output == 7);
-  sig_2(8, output, called_times);
-  CHECK(called_times == 5);
-  CHECK(output == 8);
+TEST_CASE("Test boost connect during execution") {
+  boost::signals2::signal<void()> signal_no_arguments;
+  int slot_0_called_times = 0;
+  boost::signals2::connection conn_out = signal_no_arguments.connect([&signal_no_arguments, &conn_out]() {
+    conn_out = signal_no_arguments.connect([]() {});
+  });
+  signal_no_arguments();
 }
 
-TEST_CASE("Test multiple slots") {
-  signal<void, int, int&, int&> sig_1;
-  sig_1.connect(Test_SimpleAssign);
-  sig_1.connect(Test_SimplePlusOne);
-
-  int called_times = 0;
-  int output = 0;
-  sig_1(123, output, called_times);
-  CHECK(called_times == 0);
-  connection conn_sig_1_slot_1 = sig_1.connect(Test_SimpleAssign);
-  connection conn_sig_1_slot_2 = sig_1.connect(Test_SimplePlusOne);
-  sig_1(5, output, called_times);
-  assert(called_times == 2);
-  assert(output == 6);
-  sig_1(9999, output, called_times);
-  assert(output == 10000);
-  assert(called_times == 4);
+TEST_CASE("Test signal connect during execution") {
+  signals::signal<void> signal_no_arguments;
+  int slot_0_called_times = 0;
+  signals::connection conn_out = signal_no_arguments.connect([&signal_no_arguments, &conn_out]() {
+    conn_out = signal_no_arguments.connect([]() {});
+  });
+  signal_no_arguments();
 }
 
-class TestSignalClassMember {
+TEST_CASE("Test signal iterator 1") {
+  signals::signal<int, int> signal_simple;
+  signals::connection conn_plus_1 = signal_simple.connect([](int x) -> int {
+    return x + 1;
+  });
+  signals::connection conn_multiply_2 = signal_simple.connect([](int x) -> int {
+    return x * 2;
+  });
+  signals::connection conn_minus_3 = signal_simple.connect([](int x) -> int {
+    return x - 3;
+  });
+  signals::signal<int, int>::const_iterator it = signal_simple.begin();
+  CHECK(signal_simple.signal_detail_->locks == 1);
+  CHECK((*it)(5) == 6);
+  CHECK(it != signal_simple.end());
+  ++it;
+  CHECK(signal_simple.signal_detail_->locks == 1);
+  signal_simple.begin();
+  CHECK(signal_simple.signal_detail_->locks == 1);
+  signal_simple.cbegin();
+  CHECK(signal_simple.signal_detail_->locks == 1);
+  signal_simple.cend();
+  CHECK(signal_simple.signal_detail_->locks == 1);
+  CHECK((*it)(5) == 10);
+  CHECK(it != signal_simple.begin());
+  CHECK(it != signal_simple.end());
+  CHECK((*it++)(5) == 10);
+  CHECK((*it)(5) == 2);
+  ++it;
+  CHECK(it == signal_simple.end());
+  it = signal_simple.begin();
+  signals::signal<int, int> signal_simple_2;
+  signals::connection conn = signal_simple_2.connect([](int x) -> int {
+    return x * x;
+  });
+  CHECK(signal_simple_2.signal_detail_->locks == 0);
+  CHECK(signal_simple.signal_detail_->locks == 1);
+  it = signal_simple_2.begin();
+  CHECK(signal_simple.signal_detail_->locks == 0);
+  CHECK(signal_simple_2.signal_detail_->locks == 1);
+  CHECK((*it)(5) == 25);
+  ++it;
+  CHECK(it == signal_simple_2.end());
+}
+
+TEST_CASE("Test signal iterator 2") {
+  signals::signal<int, int, bool&> signal_of_interupt;
+  signals::connection conn_1 = signal_of_interupt.connect([](int x, bool& handled) -> int {
+    return x * 16;
+  });
+  signals::connection conn_2 = signal_of_interupt.connect([](int x, bool& handled) -> int {
+    handled = true;
+    return x - 3;
+  });
+  signals::connection conn_3 = signal_of_interupt.connect([](int x, bool& handled) -> int {
+    return x * 2;
+  });
+
+  int init = 1;
+  signals::signal<int, int, bool&>::const_iterator it = signal_of_interupt.begin();
+
+  while (it != signal_of_interupt.end()) {
+    bool handled = false;
+    init = (*it)(init, handled);
+    if (handled) {
+      break;
+    }
+    ++it;
+  }
+  CHECK(init == 13);
+}
+
+TEST_CASE("Test signal iteerator three") {
+  int test = 5;
+  {
+    signals::signal<void, int&>::const_iterator iter;
+    {
+      signals::signal<void, int&> test_signal;
+      signals::connection conn = test_signal.connect([](int& i) { return i = i + 1; });
+      iter = test_signal.begin();
+      while (iter != test_signal.end()) {
+        if (*iter) {
+          (*iter)(test);
+        }
+        ++iter;
+      }
+    }
+  }
+  CHECK(test == 6);
+  {
+    signals::signal<void, int&> test_signal;
+    {
+      signals::signal<void, int&>::iterator it;
+      signals::signal<void, int&>::const_iterator const_it = it;
+      signals::connection conn = test_signal.connect([](int& i) { return i = i + 1; });
+      it = test_signal.begin();
+      while (it != test_signal.end()) {
+        if (*it) {
+          (*it)(test);
+        }
+        ++it;
+      }
+      CHECK(test_signal.signal_detail_->locks == 1);
+      const_it = it;
+      CHECK(test_signal.signal_detail_->locks == 2);
+      CHECK(test == 7);
+      CHECK(const_it == test_signal.end());
+      const_it = test_signal.begin();
+      while (const_it != test_signal.end()) {
+        if (*const_it) {
+          (*const_it)(test);
+        }
+        ++const_it;
+      }
+      CHECK(test == 8);
+      CHECK(it == test_signal.end());
+      CHECK(const_it == test_signal.end());
+      CHECK(it == const_it);
+    }
+    CHECK(test_signal.signal_detail_->locks == 0);
+  }
+}
+
+TEST_CASE("Test signal iterator stl compatibility") {
+  signals::signal<int, int> test_simple_signal;
+  signals::connection conn = test_simple_signal.connect([](int i) { return i + 3; });
+  signals::signal<int, int>::const_iterator it = test_simple_signal.begin();
+  std::advance(it, 1);
+  CHECK(it == test_simple_signal.end());
+  CHECK(std::end(test_simple_signal) == it);
+  signals::signal<int, int>::const_iterator it_1 = test_simple_signal.begin();
+  signals::signal<int, int>::const_iterator it_2 = test_simple_signal.end();
+  std::swap(it_1, it_2);
+  CHECK(it_1 == test_simple_signal.end());
+  CHECK(it_2 == test_simple_signal.begin());
+}
+
+TEST_CASE("Test disconnect during iterating") {
+  signals::signal<void> test_simple_signal;
+  signals::connection conn;
+  signals::connection conn_3;
+  {
+    conn = test_simple_signal.connect([&conn] {
+      conn.disconnect();
+    });
+    signals::connection conn_1 = test_simple_signal.connect([] {});
+    signals::connection conn_2 = test_simple_signal.connect([&conn_2] {
+      conn_2.disconnect();
+    });
+    conn_3 = test_simple_signal.connect([] {});
+    signals::connection conn_4 = test_simple_signal.connect([] {});
+    signals::connection conn_5 = test_simple_signal.connect([&conn_4] { conn_4.disconnect(); });
+    signals::connection conn_6 = test_simple_signal.connect([] {});
+    signals::connection conn_7;
+    signals::connection conn_8 = test_simple_signal.connect([&conn_7] { conn_7.disconnect(); });
+    conn_7 = test_simple_signal.connect([] {});
+    signals::connection conn_9 = test_simple_signal.connect([] {});
+    signals::signal<void>::const_iterator it = test_simple_signal.begin();
+    while (it != test_simple_signal.end()) {
+      if (*it) {
+        (*it)();
+      }
+      ++it;
+    }
+  }
+}
+
+TEST_CASE("Test boost disconnect during iterating") {
+  boost::signals2::signal<void()> test_simple_signal;
+  boost::signals2::connection conn = test_simple_signal.connect([&conn] {
+    conn.disconnect();
+  });
+  boost::signals2::connection conn_2 = test_simple_signal.connect([] {});
+  boost::signals2::connection conn_3 = test_simple_signal.connect([&conn_3] {
+    conn_3.disconnect();
+  });
+  boost::signals2::connection conn_4 = test_simple_signal.connect([] {});
+  boost::signals2::connection conn_5 = test_simple_signal.connect([] {});
+  boost::signals2::connection conn_6 = test_simple_signal.connect([&conn_5] { conn_5.disconnect(); });
+  boost::signals2::connection conn_7 = test_simple_signal.connect([] {});
+  boost::signals2::connection conn_9;
+  boost::signals2::connection conn_8 = test_simple_signal.connect([&conn_9] { conn_9.disconnect(); });
+  conn_9 = test_simple_signal.connect([] {});
+  boost::signals2::connection conn_10 = test_simple_signal.connect([] {});
+  test_simple_signal();
+}
+
+class Counter {
 public:
-  TestSignalClassMember(){
+  Counter(int* t)
+    : count(t) {
+    ++(*count);
+  }
+
+  ~Counter() {
+    --(*count);
+  }
+
+  Counter(const Counter&) = delete;
+  Counter& operator=(const Counter&) = delete;
+  Counter(Counter&&) = delete;
+  Counter& operator=(Counter&&) = delete;
+
+private:
+  int* count;
+};
+
+TEST_CASE("Test slot resource management and termination") {
+  signals::signal<void> test_signal;
+  int test = 0;
+  signals::connection conn = test_signal.connect([t = std::make_shared<Counter>(&test)]() {
+
+  });
+  CHECK(test == 1);
+  conn.disconnect();
+  CHECK(test == 0);
+  conn.disconnect();
+  CHECK(test == 0);
+}
+
+class Foo {
+public:
+  void foo(int, const long&) {
     
   }
-  signal<void, int, string&, int&> sig_1;
-  signal<void, int, string&, int&> sig_2;
 };
 
-class TestConnectionClassMember {
-public:
-  TestConnectionClassMember()
-    : sig()
-    , the_constructor_connection(sig.connect(bind(mem_fn(&TestConnectionClassMember::TestSlot), this, _1, _2, _3)))
-    , the_connection_1()
-    , the_connection_2() {
-  }
-
-  void DisconnectConstructorConnection() {
-    the_constructor_connection.disconnect();
-  }
-
-  void Connect1() {
-    the_connection_1 = sig.connect(bind(mem_fn(&TestConnectionClassMember::TestSlot), this, _1, _2, _3));
-  }
-
-  void Connect2() {
-    the_connection_2 = sig.connect(bind(mem_fn(&TestConnectionClassMember::TestSlot), this, _1, _2, _3));
-  }
-
-  void Disconnect1() {
-    the_connection_1.disconnect();
-  }
-
-  void Disconnect2() {
-    the_connection_2.disconnect();
-  }
-
-  void TestSlot(int input, string& output, int& called_times) {
-    stringstream stream;
-    stream << input * 2;
-    output = stream.str();
-    ++called_times;
-  }
-
-  signal<void, int, string&, int&> sig;
-  connection the_constructor_connection;
-  connection the_connection_1;
-  connection the_connection_2;
-};
-
-TEST_CASE("Test signal as class member") {
-  TestSignalClassMember* signal_class_object_1 = new TestSignalClassMember;
-  TestSignalClassMember* signal_class_object_2 = new TestSignalClassMember;
-  TestSignalClassMember* signal_class_object_3 = new TestSignalClassMember;
-
-  connection test_conn_1 = signal_class_object_1->sig_1.connect(signal_class_object_1->sig_2);
-  connection test_conn_2 = signal_class_object_1->sig_2.connect(signal_class_object_2->sig_1);
-  connection test_conn_3 = signal_class_object_2->sig_1.connect(signal_class_object_2->sig_2);
-  connection test_conn_4 = signal_class_object_2->sig_2.connect(signal_class_object_3->sig_1);
-  connection test_conn_5 = signal_class_object_3->sig_1.connect(signal_class_object_3->sig_2);
-  connection test_conn_6 = signal_class_object_3->sig_2.connect(Test_Multiple_Arguments);
-
-  string output;
-  int called_times = 0;
-  signal_class_object_1->sig_1(100, output, called_times);
-  CHECK(called_times == 1);
-  CHECK(output == "100");
-  signal_class_object_2->sig_1(200, output, called_times);
-  CHECK(called_times == 2);
-  CHECK(output == "200");
-  delete signal_class_object_2;
-  signal_class_object_1->sig_1(300, output, called_times);
-  CHECK(output == "200");
-  CHECK(called_times == 2);
-  delete signal_class_object_1;
-  delete signal_class_object_3;
-}
-
-TEST_CASE("Test connection as class member") {
-  TestConnectionClassMember test_object;
-  string output;
-  int called_times = 0;
-  test_object.sig(100, output, called_times);
-  CHECK(output == "200");
-  CHECK(called_times == 1);
-  test_object.Connect1();
-  test_object.sig(200, output, called_times);
-  CHECK(output == "400");
-  CHECK(called_times == 3);
-  test_object.DisconnectConstructorConnection();
-  test_object.Connect2();
-  test_object.sig(300, output, called_times);
-  CHECK(output == "600");
-  CHECK(called_times == 5);
-  test_object.Disconnect1();
-  test_object.sig(400, output, called_times);
-  CHECK(output == "800");
-  CHECK(called_times == 6);
-}
-
-int SlotFunctionReturnsInt(int param) {
-  return param * 2;
-}
-
-class ReturnValueCollector {
-public:
-  ReturnValueCollector()
-    : param(0)
-    , return_value_collected(0)
-    , called_times(0) {
-
-  }
-
-  bool SimpleReturnValueCollect(function<int(int)> the_slot) {
-    return_value_collected = the_slot(param);
-    ++called_times;
-    return true;
-  }
-
-  bool ReturnValueAsInputCollect(function<int(int)> the_slot) {
-    return_value_collected = the_slot(param);
-    param = return_value_collected;
-    ++called_times;
-    return true;
-  }
-
-  bool SlotExecuteBreaker(function<int(int)> the_slot) {
-    return_value_collected = the_slot(param);
-    ++called_times;
-    if (return_value_collected == 10) {
-      return false;
-    }
-    param = return_value_collected;
-    return true;
-  }
-
-  int param;
-  int return_value_collected;
-  int called_times;
-};
-
-int Test_SimplePlus2(int input) {
-  return input + 2;
-}
-
-int Test_SimpleMinus2(int input) {
-  return input - 2;
-}
-
-int Test_SimpleMultiply2(int input) {
-  return input * 2;
-}
-
-int Test_SimpleDivide2(int input) {
-  return input / 2;
-}
-
-TEST_CASE("Test slot return value collector") {
-  signal<int, int> the_signal;
-  connection signal_slot_connection = the_signal.connect(SlotFunctionReturnsInt);
-  ReturnValueCollector return_value_collector;
-  return_value_collector.param = 10;
-  the_signal(bind(mem_fn(&ReturnValueCollector::SimpleReturnValueCollect), &return_value_collector, _1));
-  CHECK(return_value_collector.return_value_collected == 20);
-  CHECK(return_value_collector.called_times == 1);
-
-  signal_slot_connection = the_signal.connect(Test_SimplePlus2);
-  connection signal_slot_connection2 = the_signal.connect(Test_SimpleMultiply2);
-  connection signal_slot_connection3 = the_signal.connect(Test_SimpleDivide2);
-  connection signal_slot_connection4 = the_signal.connect(Test_SimpleMinus2);
-  return_value_collector.param = 10;
-  return_value_collector.return_value_collected = 0;
-  return_value_collector.called_times = 0;
-  the_signal(bind(mem_fn(&ReturnValueCollector::ReturnValueAsInputCollect), &return_value_collector, _1));
-  CHECK(return_value_collector.return_value_collected == 10);
-  CHECK(return_value_collector.called_times == 4);
-}
-
-TEST_CASE("Test slot executing breaked") {
-  signal<int, int> the_signal;
-
-  vector<connection> connections;
-  connections.push_back(the_signal.connect(Test_SimplePlus2));
-  connections.push_back(the_signal.connect(Test_SimplePlus2));
-  connections.push_back(the_signal.connect(Test_SimplePlus2));
-  connections.push_back(the_signal.connect(Test_SimplePlus2));
-  connections.push_back(the_signal.connect(Test_SimplePlus2));
-  connections.push_back(the_signal.connect(Test_SimplePlus2));
-  connections.push_back(the_signal.connect(Test_SimplePlus2));
-  connections.push_back(the_signal.connect(Test_SimplePlus2));
-
-  ReturnValueCollector return_value_collector;
-  return_value_collector.param = 2;
-  the_signal(bind(mem_fn(&ReturnValueCollector::SlotExecuteBreaker), &return_value_collector, _1));
-  CHECK(return_value_collector.called_times == 4);
-  CHECK(return_value_collector.return_value_collected == 10);
-
-  return_value_collector.called_times = 0;
-  return_value_collector.param = 0;
-  return_value_collector.return_value_collected = 0;
-  connections.clear();
-  the_signal(bind(mem_fn(&ReturnValueCollector::SlotExecuteBreaker), &return_value_collector, _1));
-  CHECK(return_value_collector.called_times == 0);
-  connections.push_back(the_signal.connect(Test_SimplePlus2));
-  return_value_collector.param = 4;
-  the_signal(bind(mem_fn(&ReturnValueCollector::SlotExecuteBreaker), &return_value_collector, _1));
-  CHECK(return_value_collector.called_times == 1);
-  CHECK(return_value_collector.return_value_collected == 6);
+TEST_CASE("Test connect class member function") {
+  signals::signal<void, int, const long&, long> signal;
+  Foo foo_instance;
+  signal.connect(&foo_instance, &Foo::foo);
 }
