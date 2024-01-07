@@ -227,6 +227,8 @@ TEST_CASE("Test signal iteerator three") {
       while (iter != test_signal.end()) {
         if (*iter) {
           (*iter)(test);
+        } else {
+          CHECK(!(iter->operator bool()));
         }
         ++iter;
       }
