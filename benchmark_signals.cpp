@@ -10,10 +10,11 @@ void SimpleSlot(int& i) {
 }
 
 void BenchMarkZero(benchmark::State& state) {
+  int i = 2;
   for (auto _ : state) {
-    int i = 2;
     SimpleSlot(i);
   }
+  benchmark::DoNotOptimize(i);
 }
 
 BENCHMARK(BenchMarkZero);
@@ -52,6 +53,17 @@ void BenchMarkBoostConnect(benchmark::State& state) {
 }
 
 BENCHMARK(BenchMarkBoostConnect);
+
+void BenchMarkSimpleFunctionObject(benchmark::State& state) {
+  std::function<void(int&)> f(SimpleSlot);
+  int i = 0;
+  for (auto _ : state) {
+    f(i);
+  }
+  benchmark::DoNotOptimize(i);
+}
+
+BENCHMARK(BenchMarkSimpleFunctionObject);
 
 void BenchMarkSignalTrigger(benchmark::State& state) {
   int i = 0;
