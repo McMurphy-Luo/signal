@@ -8,9 +8,6 @@
 
 namespace signals2
 {
-  template<typename R, typename... T>
-  class signal2;
-
   namespace detail
   {
     struct connection_internal_base {
