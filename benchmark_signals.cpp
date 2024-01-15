@@ -37,7 +37,7 @@ void BenchMarkSharedPtr(benchmark::State& state) {
 BENCHMARK(BenchMarkSharedPtr);
 
 void BenchMarkSignalConnect(benchmark::State& state) {
-  signals::signal<void, int&> simple_signal;
+  signals2::signal2<void, int&> simple_signal;
   for (auto _ : state) {
     simple_signal.connect(SimpleSlot);
   }
@@ -67,8 +67,8 @@ BENCHMARK(BenchMarkSimpleFunctionObject);
 
 void BenchMarkSignalTrigger(benchmark::State& state) {
   int i = 0;
-  signals::signal<void, int&> simple_signal;
-  signals::connection conn = simple_signal.connect(SimpleSlot);
+  signals2::signal2<void, int&> simple_signal;
+  signals2::connection conn = simple_signal.connect(SimpleSlot);
   for (auto _ : state) {
     simple_signal(i);
   }
@@ -91,10 +91,10 @@ BENCHMARK(BenchMarkBoostTrigger);
 
 void BenchMarkSignalTriggerMultipleSlots(benchmark::State& state) {
   int i = 0;
-  signals::signal<void, int&> simple_signal;
-  signals::connection conn_1 = simple_signal.connect(SimpleSlot);
-  signals::connection conn_2 = simple_signal.connect(SimpleSlot);
-  signals::connection conn_3 = simple_signal.connect(SimpleSlot);
+  signals2::signal2<void, int&> simple_signal;
+  signals2::connection conn_1 = simple_signal.connect(SimpleSlot);
+  signals2::connection conn_2 = simple_signal.connect(SimpleSlot);
+  signals2::connection conn_3 = simple_signal.connect(SimpleSlot);
   for (auto _ : state) {
     simple_signal(i);
   }
@@ -127,7 +127,7 @@ void TestClass::Test(int i) {
 }
 
 void BenchMarkSignalConnectClassMemberFunction(benchmark::State& state) {
-  signals::signal<void, int> simple_signal;
+  signals2::signal2<void, int> simple_signal;
   for (auto _ : state) {
     TestClass obj;
     simple_signal.connect(&obj, &TestClass::Test);

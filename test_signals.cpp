@@ -20,7 +20,6 @@
 #include <vector>
 #include <sstream>
 #include "boost/signals2.hpp"
-#include "Windows.h"
 
 namespace {
   class TestClass {
@@ -35,12 +34,12 @@ namespace {
 }
 
 TEST_CASE("Test no arguments signal") {
-  signals::signal<void> signal_without_arguments;
+  signals2::signal2<void> signal_without_arguments;
   int slot_called_times = 0;
   std::function<void()> increment = [&slot_called_times]() {
     ++slot_called_times;
   };
-  signals::connection test_conn = signal_without_arguments.connect(increment);
+  signals2::connection test_conn = signal_without_arguments.connect(increment);
   signal_without_arguments();
   CHECK(slot_called_times == 1);
   test_conn.disconnect();
@@ -50,15 +49,15 @@ TEST_CASE("Test no arguments signal") {
   signal_without_arguments();
   CHECK(slot_called_times == 1);
   test_conn = signal_without_arguments.connect(increment);
-  signals::connection test_conn2 = signal_without_arguments.connect(increment);
+  signals2::connection test_conn2 = signal_without_arguments.connect(increment);
   signal_without_arguments();
   CHECK(slot_called_times == 3);
 }
 
 TEST_CASE("Test class member function for slot") {
   TestClass obj;
-  signals::signal<void, int> signal_no_arguments;
-  signals::connection conn = signal_no_arguments.connect(&obj, &TestClass::SetValue);
+  signals2::signal2<void, int> signal_no_arguments;
+  signals2::connection conn = signal_no_arguments.connect(&obj, &TestClass::SetValue);
   signal_no_arguments(5);
   CHECK(obj.called_times_ == 1);
   CHECK(obj.value_ == 5);
@@ -70,8 +69,8 @@ TEST_CASE("Test class member function for slot") {
   signal_no_arguments(89);
   CHECK(obj.called_times_ == 2);
   CHECK(obj.value_ == 89);
-  signals::signal<void, int&, std::string> signal_get_value;
-  signals::connection conn_2 = signal_get_value.connect(&obj, &TestClass::GetValue);
+  signals2::signal2<void, int&, std::string> signal_get_value;
+  signals2::connection conn_2 = signal_get_value.connect(&obj, &TestClass::GetValue);
   int output = -1;
   std::string test_str("test");
   signal_get_value(output, test_str);
@@ -104,9 +103,9 @@ TEST_CASE("Test boost disconnect during execution") {
 }
 
 TEST_CASE("Test signal disconnect during execution") {
-  signals::signal<void> signal_no_arguments;
+  signals2::signal2<void> signal_no_arguments;
   int slot_0_called_times = 0;
-  signals::connection conn_0 = signal_no_arguments.connect([&slot_0_called_times, &conn_0]() {
+  signals2::connection conn_0 = signal_no_arguments.connect([&slot_0_called_times, &conn_0]() {
     ++slot_0_called_times;
     conn_0.disconnect();
   });
@@ -114,8 +113,8 @@ TEST_CASE("Test signal disconnect during execution") {
   CHECK(slot_0_called_times == 1);
   signal_no_arguments();
   CHECK(slot_0_called_times == 1);
-  signals::connection conn_2;
-  signals::connection conn_1 = signal_no_arguments.connect([&conn_2]() {
+  signals2::connection conn_2;
+  signals2::connection conn_1 = signal_no_arguments.connect([&conn_2]() {
     conn_2.disconnect();
   });
   int slot_2_called_times = 0;
@@ -136,26 +135,26 @@ TEST_CASE("Test boost connect during execution") {
 }
 
 TEST_CASE("Test signal connect during execution") {
-  signals::signal<void> signal_no_arguments;
+  signals2::signal2<void> signal_no_arguments;
   int slot_0_called_times = 0;
-  signals::connection conn_out = signal_no_arguments.connect([&signal_no_arguments, &conn_out]() {
+  signals2::connection conn_out = signal_no_arguments.connect([&signal_no_arguments, &conn_out]() {
     conn_out = signal_no_arguments.connect([]() {});
   });
   signal_no_arguments();
 }
 
 TEST_CASE("Test signal iterator 1") {
-  signals::signal<int, int> signal_simple;
-  signals::connection conn_plus_1 = signal_simple.connect([](int x) -> int {
+  signals2::signal2<int, int> signal_simple;
+  signals2::connection conn_plus_1 = signal_simple.connect([](int x) -> int {
     return x + 1;
   });
-  signals::connection conn_multiply_2 = signal_simple.connect([](int x) -> int {
+  signals2::connection conn_multiply_2 = signal_simple.connect([](int x) -> int {
     return x * 2;
   });
-  signals::connection conn_minus_3 = signal_simple.connect([](int x) -> int {
+  signals2::connection conn_minus_3 = signal_simple.connect([](int x) -> int {
     return x - 3;
   });
-  signals::signal<int, int>::const_iterator it = signal_simple.begin();
+  signals2::signal2<int, int>::const_iterator it = signal_simple.begin();
   CHECK(signal_simple.signal_detail_->lock_->locks_ == 1);
   CHECK((*it)(5) == 6);
   CHECK(it != signal_simple.end());
@@ -175,8 +174,8 @@ TEST_CASE("Test signal iterator 1") {
   ++it;
   CHECK(it == signal_simple.end());
   it = signal_simple.begin();
-  signals::signal<int, int> signal_simple_2;
-  signals::connection conn = signal_simple_2.connect([](int x) -> int {
+  signals2::signal2<int, int> signal_simple_2;
+  signals2::connection conn = signal_simple_2.connect([](int x) -> int {
     return x * x;
   });
   CHECK(signal_simple_2.signal_detail_->lock_ == nullptr);
@@ -190,20 +189,20 @@ TEST_CASE("Test signal iterator 1") {
 }
 
 TEST_CASE("Test signal iterator 2") {
-  signals::signal<int, int, bool&> signal_of_interupt;
-  signals::connection conn_1 = signal_of_interupt.connect([](int x, bool& handled) -> int {
+  signals2::signal2<int, int, bool&> signal_of_interupt;
+  signals2::connection conn_1 = signal_of_interupt.connect([](int x, bool& handled) -> int {
     return x * 16;
   });
-  signals::connection conn_2 = signal_of_interupt.connect([](int x, bool& handled) -> int {
+  signals2::connection conn_2 = signal_of_interupt.connect([](int x, bool& handled) -> int {
     handled = true;
     return x - 3;
   });
-  signals::connection conn_3 = signal_of_interupt.connect([](int x, bool& handled) -> int {
+  signals2::connection conn_3 = signal_of_interupt.connect([](int x, bool& handled) -> int {
     return x * 2;
   });
 
   int init = 1;
-  signals::signal<int, int, bool&>::const_iterator it = signal_of_interupt.begin();
+  signals2::signal2<int, int, bool&>::const_iterator it = signal_of_interupt.begin();
 
   while (it != signal_of_interupt.end()) {
     bool handled = false;
@@ -219,10 +218,10 @@ TEST_CASE("Test signal iterator 2") {
 TEST_CASE("Test signal iteerator three") {
   int test = 5;
   {
-    signals::signal<void, int&>::const_iterator iter;
+    signals2::signal2<void, int&>::const_iterator iter;
     {
-      signals::signal<void, int&> test_signal;
-      signals::connection conn = test_signal.connect([](int& i) { return i = i + 1; });
+      signals2::signal2<void, int&> test_signal;
+      signals2::connection conn = test_signal.connect([](int& i) { return i = i + 1; });
       iter = test_signal.begin();
       while (iter != test_signal.end()) {
         if (*iter) {
@@ -236,11 +235,11 @@ TEST_CASE("Test signal iteerator three") {
   }
   CHECK(test == 6);
   {
-    signals::signal<void, int&> test_signal;
+    signals2::signal2<void, int&> test_signal;
     {
-      signals::signal<void, int&>::iterator it;
-      signals::signal<void, int&>::const_iterator const_it = it;
-      signals::connection conn = test_signal.connect([](int& i) { return i = i + 1; });
+      signals2::signal2<void, int&>::iterator it;
+      signals2::signal2<void, int&>::const_iterator const_it = it;
+      signals2::connection conn = test_signal.connect([](int& i) { return i = i + 1; });
       it = test_signal.begin();
       while (it != test_signal.end()) {
         if (*it) {
@@ -270,40 +269,40 @@ TEST_CASE("Test signal iteerator three") {
 }
 
 TEST_CASE("Test signal iterator stl compatibility") {
-  signals::signal<int, int> test_simple_signal;
-  signals::connection conn = test_simple_signal.connect([](int i) { return i + 3; });
-  signals::signal<int, int>::const_iterator it = test_simple_signal.begin();
+  signals2::signal2<int, int> test_simple_signal;
+  signals2::connection conn = test_simple_signal.connect([](int i) { return i + 3; });
+  signals2::signal2<int, int>::const_iterator it = test_simple_signal.begin();
   std::advance(it, 1);
   CHECK(it == test_simple_signal.end());
   CHECK(std::end(test_simple_signal) == it);
-  signals::signal<int, int>::const_iterator it_1 = test_simple_signal.begin();
-  signals::signal<int, int>::const_iterator it_2 = test_simple_signal.end();
+  signals2::signal2<int, int>::const_iterator it_1 = test_simple_signal.begin();
+  signals2::signal2<int, int>::const_iterator it_2 = test_simple_signal.end();
   std::swap(it_1, it_2);
   CHECK(it_1 == test_simple_signal.end());
   CHECK(it_2 == test_simple_signal.begin());
 }
 
 TEST_CASE("Test disconnect during iterating") {
-  signals::signal<void> test_simple_signal;
-  signals::connection conn;
-  signals::connection conn_3;
+  signals2::signal2<void> test_simple_signal;
+  signals2::connection conn;
+  signals2::connection conn_3;
   {
     conn = test_simple_signal.connect([&conn] {
       conn.disconnect();
     });
-    signals::connection conn_1 = test_simple_signal.connect([] {});
-    signals::connection conn_2 = test_simple_signal.connect([&conn_2] {
+    signals2::connection conn_1 = test_simple_signal.connect([] {});
+    signals2::connection conn_2 = test_simple_signal.connect([&conn_2] {
       conn_2.disconnect();
     });
     conn_3 = test_simple_signal.connect([] {});
-    signals::connection conn_4 = test_simple_signal.connect([] {});
-    signals::connection conn_5 = test_simple_signal.connect([&conn_4] { conn_4.disconnect(); });
-    signals::connection conn_6 = test_simple_signal.connect([] {});
-    signals::connection conn_7;
-    signals::connection conn_8 = test_simple_signal.connect([&conn_7] { conn_7.disconnect(); });
+    signals2::connection conn_4 = test_simple_signal.connect([] {});
+    signals2::connection conn_5 = test_simple_signal.connect([&conn_4] { conn_4.disconnect(); });
+    signals2::connection conn_6 = test_simple_signal.connect([] {});
+    signals2::connection conn_7;
+    signals2::connection conn_8 = test_simple_signal.connect([&conn_7] { conn_7.disconnect(); });
     conn_7 = test_simple_signal.connect([] {});
-    signals::connection conn_9 = test_simple_signal.connect([] {});
-    signals::signal<void>::const_iterator it = test_simple_signal.begin();
+    signals2::connection conn_9 = test_simple_signal.connect([] {});
+    signals2::signal2<void>::const_iterator it = test_simple_signal.begin();
     while (it != test_simple_signal.end()) {
       if (*it) {
         (*it)();
@@ -354,9 +353,9 @@ private:
 };
 
 TEST_CASE("Test slot resource management and termination") {
-  signals::signal<void> test_signal;
+  signals2::signal2<void> test_signal;
   int test = 0;
-  signals::connection conn = test_signal.connect([t = std::make_shared<Counter>(&test)]() {
+  signals2::connection conn = test_signal.connect([t = std::make_shared<Counter>(&test)]() {
 
   });
   CHECK(test == 1);
@@ -374,7 +373,7 @@ public:
 };
 
 TEST_CASE("Test connect class member function") {
-  signals::signal<void, int, const long&, long> signal;
+  signals2::signal2<void, int, const long&, long> signal;
   Foo foo_instance;
   signal.connect(&foo_instance, &Foo::foo);
 }

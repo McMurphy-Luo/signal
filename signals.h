@@ -6,10 +6,10 @@
 #include <algorithm>
 #include <memory>
 
-namespace signals
+namespace signals2
 {
   template<typename R, typename... T>
-  class signal;
+  class signal2;
 
   namespace detail
   {
@@ -23,7 +23,7 @@ namespace signals
     class signal_detail;
     
     template<typename R, typename... T>
-    using slot = std::function<R (T...)>;
+    using slot2 = std::function<R (T...)>;
 
     template<typename R, typename... T>
     class signal_lock {
@@ -332,11 +332,11 @@ namespace signals
         return const_iterator(connections_.size(), lock_);
       }
 
-      std::vector<slot<R, T...>*>& connections() {
+      std::vector<slot2<R, T...>*>& connections() {
         return connections_;
       }
 
-      void connect(slot<R, T...>* s) {
+      void connect(slot2<R, T...>* s) {
         connections_.push_back(s);
       }
 
@@ -344,7 +344,7 @@ namespace signals
         lock_->invalid();
       }
 
-      void remove(slot<R, T...>* v) {
+      void remove(slot2<R, T...>* v) {
         connections_.erase(std::find(connections_.begin(), connections_.end(), v));
       }
 
@@ -356,8 +356,8 @@ namespace signals
       }
 
       void compact() {
-        typename std::vector<slot<R, T...>*>::iterator it_1 = connections_.begin();
-        typename std::vector<slot<R, T...>*>::iterator it_2 = it_1;
+        typename std::vector<slot2<R, T...>*>::iterator it_1 = connections_.begin();
+        typename std::vector<slot2<R, T...>*>::iterator it_2 = it_1;
         while (it_1 != connections_.end()) {
           if (**(it_1)) {
             if (it_1 != it_2) {
@@ -373,14 +373,14 @@ namespace signals
       }
 
     private:
-      std::vector<slot<R, T...>*> connections_;
+      std::vector<slot2<R, T...>*> connections_;
       signal_lock<R, T...>* lock_;
     };
 
     template<typename R, typename... T>
     struct signal_slot_connection : public connection_internal_base {
       std::weak_ptr<signal_detail<R, T...>> the_signal;
-      std::unique_ptr<slot<R, T...>> the_slot;
+      std::unique_ptr<slot2<R, T...>> the_slot;
       virtual ~signal_slot_connection() {
         disconnect();
       }
@@ -425,9 +425,16 @@ namespace signals
         , std::forward_as_tuple(std::forward<Args>(args)...));
     }
 
+    // https://en.cppreference.com/w/cpp/types/conditional 
+    template<class...> struct conjunction : std::true_type {};
+    template<class B1> struct conjunction<B1> : B1 {};
+    template<class B1, class... Bn>
+    struct conjunction<B1, Bn...>
+      : std::conditional<bool(B1::value), conjunction<Bn...>, B1>::type {};
+
     template<typename A, typename B, size_t... I>
     constexpr bool contains(std::index_sequence<I...>) {
-      return std::conjunction_v<std::is_same<std::tuple_element_t<I, A>, std::tuple_element_t<I, B>>...>;
+      return conjunction<std::is_same<typename std::tuple_element<I, A>::type, typename std::tuple_element<I, B>::type>...>::value;
     }
   }
 
@@ -466,24 +473,24 @@ namespace signals
   };
 
   template<typename R, typename... T>
-  class signal final {
+  class signal2 final {
   public:
     using iterator = typename detail::signal_detail<R, T...>::iterator;
     using const_iterator = typename detail::signal_detail<R, T...>::const_iterator;
 
-    signal() = default;
+    signal2() = default;
 
-    signal(const signal&) = delete;
+    signal2(const signal2&) = delete;
 
-    signal& operator=(const signal&) = delete;
+    signal2& operator=(const signal2&) = delete;
 
-    signal(signal&& rhs) noexcept
+    signal2(signal2&& rhs) noexcept
       : signal_detail_(std::move(rhs.signal_detail_))
     {
 
     }
 
-    signal& operator=(signal&& rhs) noexcept {
+    signal2& operator=(signal2&& rhs) noexcept {
       signal_detail_ = std::move(rhs.signal_detail_);
       return *this;
     }
@@ -511,7 +518,7 @@ namespace signals
     connection connect(const std::function<R (T...)>& the_function) {
       create_shared_block();
       std::unique_ptr<detail::signal_slot_connection<R, T...>> connection_detail(new detail::signal_slot_connection<R, T...>());
-      std::unique_ptr<detail::slot<R, T...>> the_slot(new detail::slot<R, T...>(the_function));
+      std::unique_ptr<detail::slot2<R, T...>> the_slot(new detail::slot2<R, T...>(the_function));
       signal_detail_->connect(the_slot.get());
       connection_detail->the_signal = signal_detail_;
       connection_detail->the_slot = std::move(the_slot);
@@ -522,7 +529,7 @@ namespace signals
     connection connect(std::function<R(T...)>&& the_function) {
       create_shared_block();
       std::unique_ptr<detail::signal_slot_connection<R, T...>> connection_detail(new detail::signal_slot_connection<R, T...>());
-      std::unique_ptr<detail::slot<R, T...>> the_slot(new detail::slot<R, T...>(std::move(the_function)));
+      std::unique_ptr<detail::slot2<R, T...>> the_slot(new detail::slot2<R, T...>(std::move(the_function)));
       signal_detail_->connect(the_slot.get());
       connection_detail->the_signal = signal_detail_;
       connection_detail->the_slot = std::move(the_slot);
@@ -575,7 +582,7 @@ namespace signals
 
 namespace std {
   template<int N>
-  struct is_placeholder<signals::placeholder<N>> : std::integral_constant<int, N> { };
+  struct is_placeholder<signals2::placeholder<N>> : std::integral_constant<int, N> { };
 }
 
 #endif // SIGNALS_H_
