@@ -14,6 +14,8 @@ namespace signals2
       virtual ~connection_internal_base() {
 
       }
+
+      virtual bool connected() = 0;
     };
 
     template<typename R, typename... T>
@@ -120,26 +122,9 @@ namespace signals2
         return *this;
       }
 
-      void reset()
-      {
-        lock_ptr().swap(*this);
-      }
-
-      void reset(T* rhs)
-      {
-        lock_ptr(rhs).swap(*this);
-      }
-
       T* get() const noexcept
       {
         return lock_;
-      }
-
-      [[nodiscard]] T* detach() noexcept
-      {
-        T* ret = lock_;
-        lock_ = 0;
-        return ret;
       }
 
       T& operator*() const noexcept
@@ -378,9 +363,14 @@ namespace signals2
     struct signal_slot_connection : public connection_internal_base {
       std::weak_ptr<signal_detail<R, T...>> the_signal;
       std::unique_ptr<slot2<R, T...>> the_slot;
-      virtual ~signal_slot_connection() {
+      virtual ~signal_slot_connection() override {
         disconnect();
       }
+
+      bool connected() override {
+        return !the_signal.expired();
+      }
+
       void disconnect() {
         *the_slot = nullptr;
         std::shared_ptr<signal_detail<R, T...>> signal = the_signal.lock();
@@ -464,6 +454,8 @@ namespace signals2
     }
 
     void disconnect() { connection_detail_.reset(); }
+
+    bool connected() { return connection_detail_ && connection_detail_->connected(); }
 
   private:
     std::unique_ptr<detail::connection_internal_base> connection_detail_;

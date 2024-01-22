@@ -19,6 +19,7 @@
 #include <cstdio>
 #include <vector>
 #include <sstream>
+#include <functional>
 #include "boost/signals2.hpp"
 
 namespace {
@@ -376,4 +377,56 @@ TEST_CASE("Test connect class member function") {
   signals2::signal2<void, int, const long&, long> signal;
   Foo foo_instance;
   signal.connect(&foo_instance, &Foo::foo);
+}
+
+TEST_CASE("Test connect while triggering") {
+  boost::signals2::signal<void(int&)> b_signal;
+  boost::signals2::connection b_conn;
+
+  std::function<void(int&)> b_lambda;
+  b_lambda = [&b_signal, &b_lambda, &b_conn](int& v) {
+    ++v;
+    b_conn = b_signal.connect(b_lambda);
+  };
+  b_conn = b_signal.connect(b_lambda);
+  int b = 0;
+  b_signal(b);
+  
+  signals2::signal2<void, int&> s_signal;
+  signals2::connection s_conn;
+  std::function<void(int&)> s_lambda = [&s_signal, &s_lambda, &s_conn](int& v) {
+    // infinite loop
+    ++v;
+    if (v != 99) {
+      s_conn = s_signal.connect(s_lambda);
+    }
+  };
+  s_conn = s_signal.connect(s_lambda);
+  int s = 0;
+  s_signal(s);
+  CHECK(s == 99);
+}
+
+TEST_CASE("Test connected") {
+  boost::signals2::connection conn_boost;
+  {
+    CHECK(!conn_boost.connected());
+    boost::signals2::signal<int(int)> test_b_signal;
+    conn_boost = test_b_signal.connect([](int v) {
+      return v + 1;
+    });
+    CHECK(conn_boost.connected());
+  }
+  CHECK(!conn_boost.connected());
+
+  signals2::connection conn_signal;
+  {
+    CHECK(!conn_signal.connected());
+    signals2::signal2<int, int> test_signal;
+    conn_signal = test_signal.connect([](int v) {
+      return v + 1;
+    });
+    CHECK(conn_signal.connected());
+  }
+  CHECK(!conn_signal.connected());
 }
