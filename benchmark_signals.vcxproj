@@ -87,7 +87,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="benchmark_signals.cpp" />
+    <ClCompile Include="signals_benchmark.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="signals.h" />
