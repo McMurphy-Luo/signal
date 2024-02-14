@@ -356,7 +356,7 @@ namespace signals2
 
     private:
       std::vector<slot2<R, T...>*> connections_;
-      signal_lock<R, T...>* lock_;
+      signal_lock<R, T...>* lock_ = nullptr;
     };
 
     template<typename R, typename... T>
