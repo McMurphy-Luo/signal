@@ -354,7 +354,7 @@ private:
 };
 
 TEST_CASE("Test slot resource management and termination") {
-  signals2::signal2<void(), int> test_signal;
+  signals2::signal2<void()> test_signal;
   int test = 0;
   signals2::connection conn = test_signal.connect([t = std::make_shared<Counter>(&test)]() {
 

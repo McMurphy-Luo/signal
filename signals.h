@@ -547,9 +547,7 @@ namespace signals2
 
   template<typename R, typename... T>
   class signal_impl {
-  private:
     using function_type = R(T...);
-
   public:
     using iterator = typename detail::signal_detail<function_type>::iterator;
     using const_iterator = typename detail::signal_detail<function_type>::const_iterator;
@@ -650,8 +648,6 @@ namespace signals2
         signal_detail_ = std::make_shared<detail::signal_detail<function_type>>();
       }
     }
-
-  private:
     std::shared_ptr<detail::signal_detail<function_type>> signal_detail_;
   };
 
