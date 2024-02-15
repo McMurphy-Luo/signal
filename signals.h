@@ -648,6 +648,7 @@ namespace signals2
         signal_detail_ = std::make_shared<detail::signal_detail<function_type>>();
       }
     }
+
     std::shared_ptr<detail::signal_detail<function_type>> signal_detail_;
   };
 
