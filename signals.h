@@ -5,9 +5,93 @@
 #include <functional>
 #include <algorithm>
 #include <memory>
+#include <tuple>
 
 namespace signals2
 {
+  namespace function_traits
+  {
+    template<typename L> struct pop_front_impl {
+
+    };
+
+    template<template<typename...> typename T, typename T1, typename... TN> struct pop_front_impl<T<T1, TN...>>
+    {
+      using type = T<TN...>;
+    };
+
+    template<typename T> using pop_front = typename pop_front_impl<T>::type;
+
+    template<typename... T> using first = typename std::tuple_element<0, std::tuple<T...>>::type;
+
+    template<typename T> using rest = pop_front<T>;
+
+    template <typename T> struct remove_noexcept {
+      using type = T;
+    };
+
+    template <typename R, typename... A>  struct remove_noexcept<R(*)(A...) noexcept> {
+      using type = R(*)(A...);
+    };
+
+    template <typename C, typename R, typename... A>  struct remove_noexcept<R(C::*)(A...) noexcept> {
+      using type = R(C::*)(A...);
+    };
+
+    template <typename C, typename R, typename... A>  struct remove_noexcept<R(C::*)(A...) const noexcept> {
+      using type = R(C::*)(A...) const;
+    };
+
+    template<typename F, typename V = void>
+    struct function_traits_impl
+    {
+    };
+
+    template<typename F>
+    struct function_traits_impl<F, std::void_t<decltype(&F::operator())>>
+    {
+    private:
+      using tr = function_traits_impl<typename remove_noexcept<decltype(&F::operator())>::type>;
+    public:
+      using return_type = typename tr::return_type;
+      using argument_type = rest<typename tr::argument_type>;
+    };
+
+    template<typename R, typename... A>
+    struct function_traits_impl<R(A...)>
+    {
+      using return_type = R;
+      using argument_type = std::tuple<A...>;
+    };
+
+    template<typename F> struct function_traits_impl<F&> : function_traits_impl<F> { };
+    template<typename F> struct function_traits_impl<F&&> : function_traits_impl<F> { };
+    template<typename R, typename... A> struct function_traits_impl<R(*)(A...)> : function_traits_impl<R(A...)> { };
+    template<typename R, typename... A> struct function_traits_impl<R(*&)(A...)> : function_traits_impl<R(A...)> { };
+    template<typename R, typename... A> struct function_traits_impl<R(* const&)(A...)> : function_traits_impl<R(A...)> { };
+    template<typename C, typename R, typename... A> struct function_traits_impl<R(C::*)(A...)> : function_traits_impl<R(C&, A...)> { };
+    template<typename C, typename R, typename... A> struct function_traits_impl<R(C::*)(A...) const> : function_traits_impl<R(C const&, A...)> { };
+    template<typename C, typename R> struct function_traits_impl<R(C::*)> : function_traits_impl<R(C&)> { };
+
+    template<bool is_function, typename... T>
+    struct function_traits_helper;
+
+    template<typename... T>
+    struct function_traits_helper<true, T...> : function_traits_impl<typename remove_noexcept<first<T...>>::type>
+    {
+      static_assert(sizeof... (T) == 1, "Only accepts one template argument if it is a function object");
+    };
+
+    template<typename... T>
+    struct function_traits_helper<false, T...> {
+      using return_type = first<T...>;
+      using argument_type = rest<std::tuple<T...>>;
+    };
+
+    template<typename... T>
+    using function_traits = function_traits_helper<std::is_function<first<T...>>::value, T...>;
+  }
+
   namespace detail
   {
     struct connection_internal_base {
@@ -257,7 +341,7 @@ namespace signals2
       friend bool operator!= (const slot_const_iterator& a, const slot_const_iterator& b) { return !operator==(a, b); }
 
     private:
-      size_t index_;
+      size_t index_ = 0;
       lock_ptr<signal_lock<F>> lock_;
     };
 
@@ -462,25 +546,27 @@ namespace signals2
   };
 
   template<typename R, typename... T>
-  class signal2 final {
+  class signal_impl {
+  private:
+    using function_type = R(T...);
+
   public:
-    using FunctionType = R(T...);
-    using iterator = typename detail::signal_detail<FunctionType>::iterator;
-    using const_iterator = typename detail::signal_detail<FunctionType>::const_iterator;
+    using iterator = typename detail::signal_detail<function_type>::iterator;
+    using const_iterator = typename detail::signal_detail<function_type>::const_iterator;
 
-    signal2() = default;
+    signal_impl() = default;
 
-    signal2(const signal2&) = delete;
+    signal_impl(const signal_impl&) = delete;
 
-    signal2& operator=(const signal2&) = delete;
+    signal_impl& operator=(const signal_impl&) = delete;
 
-    signal2(signal2&& rhs) noexcept
+    signal_impl(signal_impl&& rhs) noexcept
       : signal_detail_(std::move(rhs.signal_detail_))
     {
 
     }
 
-    signal2& operator=(signal2&& rhs) noexcept {
+    signal_impl& operator=(signal_impl&& rhs) noexcept {
       signal_detail_ = std::move(rhs.signal_detail_);
       return *this;
     }
@@ -505,10 +591,10 @@ namespace signals2
       return signal_detail_->cend();
     }
 
-    connection connect(const std::function<FunctionType>& the_function) {
+    connection connect(const std::function<function_type>& the_function) {
       create_shared_block();
-      std::unique_ptr<detail::signal_slot_connection<FunctionType>> connection_detail(new detail::signal_slot_connection<FunctionType>());
-      std::unique_ptr<detail::slot2<FunctionType>> the_slot(new detail::slot2<FunctionType>(the_function));
+      std::unique_ptr<detail::signal_slot_connection<function_type>> connection_detail(new detail::signal_slot_connection<function_type>());
+      std::unique_ptr<detail::slot2<function_type>> the_slot(new detail::slot2<function_type>(the_function));
       signal_detail_->connect(the_slot.get());
       connection_detail->the_signal = signal_detail_;
       connection_detail->the_slot = std::move(the_slot);
@@ -516,10 +602,10 @@ namespace signals2
       return result;
     }
 
-    connection connect(std::function<FunctionType>&& the_function) {
+    connection connect(std::function<function_type>&& the_function) {
       create_shared_block();
-      std::unique_ptr<detail::signal_slot_connection<FunctionType>> connection_detail(new detail::signal_slot_connection<FunctionType>());
-      std::unique_ptr<detail::slot2<FunctionType>> the_slot(new detail::slot2<FunctionType>(std::move(the_function)));
+      std::unique_ptr<detail::signal_slot_connection<function_type>> connection_detail(new detail::signal_slot_connection<function_type>());
+      std::unique_ptr<detail::slot2<function_type>> the_slot(new detail::slot2<function_type>(std::move(the_function)));
       signal_detail_->connect(the_slot.get());
       connection_detail->the_signal = signal_detail_;
       connection_detail->the_slot = std::move(the_slot);
@@ -561,12 +647,25 @@ namespace signals2
   private:
     void create_shared_block() {
       if (!signal_detail_) {
-        signal_detail_ = std::make_shared<detail::signal_detail<FunctionType>>();
+        signal_detail_ = std::make_shared<detail::signal_detail<function_type>>();
       }
     }
 
   private:
-    std::shared_ptr<detail::signal_detail<FunctionType>> signal_detail_;
+    std::shared_ptr<detail::signal_detail<function_type>> signal_detail_;
+  };
+
+  template<typename R, typename T> class signal_helper {
+
+  };
+
+  template<template<typename...> typename T, typename R, typename... TN> class signal_helper<R, T<TN...>> : public signal_impl<R, TN...>
+  {
+  };
+  
+  template<typename... T>
+  class signal2 final : public signal_helper<typename function_traits::function_traits<T...>::return_type, typename function_traits::function_traits<T...>::argument_type> {
+
   };
 }
 

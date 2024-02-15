@@ -219,7 +219,7 @@ TEST_CASE("Test signal iterator 2") {
 TEST_CASE("Test signal iteerator three") {
   int test = 5;
   {
-    signals2::signal2<void, int&>::const_iterator iter;
+    signals2::signal2<void(int&)>::const_iterator iter;
     {
       signals2::signal2<void, int&> test_signal;
       signals2::connection conn = test_signal.connect([](int& i) { return i = i + 1; });
@@ -354,7 +354,7 @@ private:
 };
 
 TEST_CASE("Test slot resource management and termination") {
-  signals2::signal2<void> test_signal;
+  signals2::signal2<void(), int> test_signal;
   int test = 0;
   signals2::connection conn = test_signal.connect([t = std::make_shared<Counter>(&test)]() {
 
@@ -374,7 +374,7 @@ public:
 };
 
 TEST_CASE("Test connect class member function") {
-  signals2::signal2<void, int, const long&, long> signal;
+  signals2::signal2<void(int, const long&, long) noexcept> signal;
   Foo foo_instance;
   signal.connect(&foo_instance, &Foo::foo);
 }
