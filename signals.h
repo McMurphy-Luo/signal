@@ -3,13 +3,18 @@
 
 #include <vector>
 #include <functional>
-#include <algorithm>
 #include <memory>
 #include <tuple>
 
 namespace signals2
 {
-  namespace function_traits
+  template<int N>
+  struct placeholder { static placeholder ph; };
+
+  template<int N>
+  placeholder<N> placeholder<N>::ph;
+
+  namespace detail
   {
     template<typename L> struct pop_front_impl {
 
@@ -26,22 +31,6 @@ namespace signals2
 
     template<typename T> using rest = pop_front<T>;
 
-    template <typename T> struct remove_noexcept {
-      using type = T;
-    };
-
-    template <typename R, typename... A>  struct remove_noexcept<R(*)(A...) noexcept> {
-      using type = R(*)(A...);
-    };
-
-    template <typename C, typename R, typename... A>  struct remove_noexcept<R(C::*)(A...) noexcept> {
-      using type = R(C::*)(A...);
-    };
-
-    template <typename C, typename R, typename... A>  struct remove_noexcept<R(C::*)(A...) const noexcept> {
-      using type = R(C::*)(A...) const;
-    };
-
     template<typename F, typename V = void>
     struct function_traits_impl
     {
@@ -51,7 +40,7 @@ namespace signals2
     struct function_traits_impl<F, std::void_t<decltype(&F::operator())>>
     {
     private:
-      using tr = function_traits_impl<typename remove_noexcept<decltype(&F::operator())>::type>;
+      using tr = function_traits_impl<decltype(&F::operator())>;
     public:
       using return_type = typename tr::return_type;
       using argument_type = rest<typename tr::argument_type>;
@@ -64,22 +53,13 @@ namespace signals2
       using argument_type = std::tuple<A...>;
     };
 
-    template<typename F> struct function_traits_impl<F&> : function_traits_impl<F> { };
-    template<typename F> struct function_traits_impl<F&&> : function_traits_impl<F> { };
-    template<typename R, typename... A> struct function_traits_impl<R(*)(A...)> : function_traits_impl<R(A...)> { };
-    template<typename R, typename... A> struct function_traits_impl<R(*&)(A...)> : function_traits_impl<R(A...)> { };
-    template<typename R, typename... A> struct function_traits_impl<R(* const&)(A...)> : function_traits_impl<R(A...)> { };
-    template<typename C, typename R, typename... A> struct function_traits_impl<R(C::*)(A...)> : function_traits_impl<R(C&, A...)> { };
-    template<typename C, typename R, typename... A> struct function_traits_impl<R(C::*)(A...) const> : function_traits_impl<R(C const&, A...)> { };
-    template<typename C, typename R> struct function_traits_impl<R(C::*)> : function_traits_impl<R(C&)> { };
-
     template<bool is_function, typename... T>
     struct function_traits_helper;
 
     template<typename... T>
-    struct function_traits_helper<true, T...> : function_traits_impl<typename remove_noexcept<first<T...>>::type>
+    struct function_traits_helper<true, T...> : function_traits_impl<first<T...>>
     {
-      static_assert(sizeof... (T) == 1, "Only accepts one template argument if it is a function object");
+      static_assert(sizeof... (T) == 1, "only accepts one template argument if it is a function object");
     };
 
     template<typename... T>
@@ -90,10 +70,7 @@ namespace signals2
 
     template<typename... T>
     using function_traits = function_traits_helper<std::is_function<first<T...>>::value, T...>;
-  }
 
-  namespace detail
-  {
     struct connection_internal_base {
       virtual ~connection_internal_base() {
 
@@ -285,7 +262,7 @@ namespace signals2
       friend bool operator!= (const slot_iterator& a, const slot_iterator& b) { return !operator==(a, b); }
 
     private:
-      size_t index_;
+      size_t index_ = 0;
       lock_ptr<signal_lock<F>> lock_;
     };
 
@@ -507,22 +484,16 @@ namespace signals2
     constexpr bool contains(std::index_sequence<I...>) {
       return conjunction<std::is_same<typename std::tuple_element<I, A>::type, typename std::tuple_element<I, B>::type>...>::value;
     }
-  }
 
-  template<int N>
-  struct placeholder { static placeholder ph; };
+    template<class R, class T, class...Types, int... indices>
+    std::function<R(Types...)> bind(T* obj, R(T::* member_fn)(Types...), std::integer_sequence<int, indices...> /*seq*/) {
+      return std::bind(std::mem_fn(member_fn), obj, placeholder<indices + 1>::ph...);
+    }
 
-  template<int N>
-  placeholder<N> placeholder<N>::ph;
-
-  template<class R, class T, class...Types, int... indices>
-  std::function<R(Types...)> bind(T* obj, R(T::* member_fn)(Types...), std::integer_sequence<int, indices...> /*seq*/) {
-    return std::bind(std::mem_fn(member_fn), obj, placeholder<indices + 1>::ph...);
-  }
-
-  template<class R, class T, class...Types>
-  std::function<R(Types...)> bind(T* obj, R(T::* member_fn)(Types...)) {
-    return bind(obj, member_fn, std::make_integer_sequence<int, sizeof...(Types)>());
+    template<class R, class T, class...Types>
+    std::function<R(Types...)> bind(T* obj, R(T::* member_fn)(Types...)) {
+      return bind(obj, member_fn, std::make_integer_sequence<int, sizeof...(Types)>());
+    }
   }
 
   class connection final {
@@ -545,9 +516,9 @@ namespace signals2
     std::unique_ptr<detail::connection_internal_base> connection_detail_;
   };
 
-  template<typename R, typename... T>
+  template<typename R, typename... A>
   class signal_impl {
-    using function_type = R(T...);
+    using function_type = R(A...);
   public:
     using iterator = typename detail::signal_detail<function_type>::iterator;
     using const_iterator = typename detail::signal_detail<function_type>::const_iterator;
@@ -612,24 +583,24 @@ namespace signals2
     }
 
     template<typename C>
-    connection connect(C* obj, R(C::* member_function)(T...)) {
+    connection connect(C* obj, R(C::* member_function)(A...)) {
       return connect(
-        [=](T... args) -> R {
+        [=](A... args) -> R {
           return (obj->*member_function)(args...);
         }
       );
     }
 
     template<typename C, typename... V>
-    connection connect(C* obj, R(C::*member_function)(V...)) {
-      static_assert(sizeof...(T) >= sizeof...(V), "Cannot connect a slot that receive arguments more than signal can provide");
-      static_assert(detail::contains<std::tuple<T...>, std::tuple<V...>>(std::make_index_sequence<sizeof...(V)>{}), "The function parameter signature that a slot accepts must match the signature of the signal");
-      return connect([binder = bind(obj, member_function)](T... params) -> R {
+    connection connect(C* obj, R(C::* member_function)(V...)) {
+      static_assert(sizeof...(A) >= sizeof...(V), "cannot connect a slot that receive arguments more than signal can provide");
+      static_assert(detail::contains<std::tuple<A...>, std::tuple<V...>>(std::make_index_sequence<sizeof...(V)>{}), "the signature of slot must match the signature of the signal");
+      return connect([binder = detail::bind(obj, member_function)](A... params) -> R {
         return detail::invoke(binder, params...);
-      });
+        });
     }
 
-    void operator()(T... param) {
+    void operator()(A... param) {
       if (!signal_detail_) {
         return;
       }
@@ -652,16 +623,18 @@ namespace signals2
     std::shared_ptr<detail::signal_detail<function_type>> signal_detail_;
   };
 
-  template<typename R, typename T> class signal_helper {
+  template<typename R, typename A>
+  class signal_helper {
 
   };
 
-  template<template<typename...> typename T, typename R, typename... TN> class signal_helper<R, T<TN...>> : public signal_impl<R, TN...>
+  template<template<typename...> typename T, typename R, typename... A>
+  class signal_helper<R, T<A...>> : public signal_impl<R, A...>
   {
   };
-  
+
   template<typename... T>
-  class signal2 final : public signal_helper<typename function_traits::function_traits<T...>::return_type, typename function_traits::function_traits<T...>::argument_type> {
+  class signal2 final : public signal_helper<typename detail::function_traits<T...>::return_type, typename detail::function_traits<T...>::argument_type> {
 
   };
 }
