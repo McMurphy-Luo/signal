@@ -404,7 +404,7 @@ namespace signals2
         while (it_1 != connections_.end()) {
           if (**(it_1)) {
             if (it_1 != it_2) {
-              *it_2 = std::move(*it_1);
+              *it_2 = *it_1;
             }
             ++it_2;
           } else {
