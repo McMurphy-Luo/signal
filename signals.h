@@ -36,8 +36,14 @@ namespace signals2
     {
     };
 
+    template<typename... Ts>
+    struct make_void { typedef void type; };
+
+    template<typename... Ts>
+    using void_t = typename make_void<Ts...>::type;
+
     template<typename F>
-    struct function_traits_impl<F, std::void_t<decltype(&F::operator())>>
+    struct function_traits_impl<F, void_t<decltype(&F::operator())>>
     {
     private:
       using tr = function_traits_impl<decltype(&F::operator())>;
@@ -604,10 +610,14 @@ namespace signals2
       if (!signal_detail_) {
         return;
       }
+      std::weak_ptr<detail::signal_detail<function_type>> alive = signal_detail_;
       const_iterator it = cbegin();
       while (it != cend()) {
         if (*it) {
           (*it)(param...);
+          if (alive.expired()) {
+            break;
+          }
         }
         ++it;
       }
