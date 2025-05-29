@@ -566,7 +566,7 @@ namespace signals2
       return signal_detail_->cend();
     }
 
-    connection connect(const std::function<function_type>& the_function) {
+    [[nodiscard]] connection connect(const std::function<function_type>& the_function) {
       create_shared_block();
       std::unique_ptr<detail::signal_slot_connection<function_type>> connection_detail(new detail::signal_slot_connection<function_type>());
       std::unique_ptr<detail::slot2<function_type>> the_slot(new detail::slot2<function_type>(the_function));
@@ -577,7 +577,7 @@ namespace signals2
       return result;
     }
 
-    connection connect(std::function<function_type>&& the_function) {
+    [[nodiscard]] connection connect(std::function<function_type>&& the_function) {
       create_shared_block();
       std::unique_ptr<detail::signal_slot_connection<function_type>> connection_detail(new detail::signal_slot_connection<function_type>());
       std::unique_ptr<detail::slot2<function_type>> the_slot(new detail::slot2<function_type>(std::move(the_function)));
@@ -589,7 +589,7 @@ namespace signals2
     }
 
     template<typename C>
-    connection connect(C* obj, R(C::* member_function)(A...)) {
+    [[nodiscard]] connection connect(C* obj, R(C::* member_function)(A...)) {
       return connect(
         [=](A... args) -> R {
           return (obj->*member_function)(args...);
@@ -598,7 +598,7 @@ namespace signals2
     }
 
     template<typename C, typename... V>
-    connection connect(C* obj, R(C::* member_function)(V...)) {
+    [[nodiscard]] connection connect(C* obj, R(C::* member_function)(V...)) {
       static_assert(sizeof...(A) >= sizeof...(V), "cannot connect a slot that receive arguments more than signal can provide");
       static_assert(detail::contains<std::tuple<A...>, std::tuple<V...>>(std::make_index_sequence<sizeof...(V)>{}), "the signature of slot must match the signature of the signal");
       return connect([binder = detail::bind(obj, member_function)](A... params) -> R {
