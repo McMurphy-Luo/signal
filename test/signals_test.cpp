@@ -11,11 +11,17 @@
 #define DBG_NEW new ( _NORMAL_BLOCK , __FILE__ , __LINE__ )
 // Replace _NORMAL_BLOCK with _CLIENT_BLOCK if you want the
 // allocations to be of _CLIENT_BLOCK type
-#define private public
 #endif // _DEBUG
 
 #include "catch.hpp"
+
+#if defined(_DEBUG) || defined(SIGNALS_ENABLE_TEST_ACCESS)
+#define private public
+#endif
 #include "signals.h"
+#if defined(_DEBUG) || defined(SIGNALS_ENABLE_TEST_ACCESS)
+#undef private
+#endif
 #include <cstdio>
 #include <vector>
 #include <sstream>
