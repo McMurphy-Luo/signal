@@ -60,7 +60,7 @@
 
 #include "signals.h"
 
-namespace states {
+namespace signals2 {
 
 /// Whether Subscribe() invokes the callback once with the current value.
 enum class FireNow { No, Yes };
@@ -366,6 +366,6 @@ private:
   bool recomputing_ = false;
 };
 
-}  // namespace states
+}  // namespace signals2
 
 #endif  // STATE_H_
