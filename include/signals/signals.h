@@ -1,10 +1,15 @@
 #ifndef SIGNALS_H_
 #define SIGNALS_H_
 
-#include <vector>
+#include <cassert>
+#include <cstddef>
 #include <functional>
+#include <iterator>
 #include <memory>
 #include <tuple>
+#include <type_traits>
+#include <utility>
+#include <vector>
 
 namespace signals2
 {

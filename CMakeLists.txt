@@ -4,6 +4,9 @@ project(signals2 VERSION 0.1.0 LANGUAGES CXX)
 
 include(GNUInstallDirs)
 
+option(SIGNALS2_BUILD_TESTS "Build signals2 tests" OFF)
+option(SIGNALS2_BUILD_BENCHMARKS "Build signals2 benchmarks" OFF)
+
 add_library(signals2 INTERFACE)
 add_library(signals2::signals2 ALIAS signals2)
 
@@ -14,6 +17,11 @@ target_include_directories(
 )
 
 target_compile_features(signals2 INTERFACE cxx_std_14)
+
+if(SIGNALS2_BUILD_TESTS OR SIGNALS2_BUILD_BENCHMARKS)
+  enable_testing()
+  add_subdirectory(test)
+endif()
 
 install(
   TARGETS signals2

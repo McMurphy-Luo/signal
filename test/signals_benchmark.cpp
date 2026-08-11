@@ -1,6 +1,6 @@
 #include <cassert>
 #include <iostream>
-#include "signals.h"
+#include <signals/signals.h>
 #include "boost/signals2.hpp"
 #include "benchmark/benchmark.h"
 

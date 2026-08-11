@@ -18,7 +18,7 @@
 #if defined(_DEBUG) || defined(SIGNALS_ENABLE_TEST_ACCESS)
 #define private public
 #endif
-#include "signals.h"
+#include <signals/signals.h>
 #if defined(_DEBUG) || defined(SIGNALS_ENABLE_TEST_ACCESS)
 #undef private
 #endif
