@@ -64,6 +64,11 @@ namespace signals2
       using argument_type = std::tuple<A...>;
     };
 
+    template<typename R, typename... A>
+    struct function_traits_impl<R(A...) noexcept> : function_traits_impl<R(A...)>
+    {
+    };
+
     template<bool is_function, typename... T>
     struct function_traits_helper;
 

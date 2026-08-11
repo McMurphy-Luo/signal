@@ -6,7 +6,7 @@ if(SIGNALS2_BUILD_TESTS)
   target_link_libraries(signals2_tests PRIVATE signals2::signals2 Boost::boost)
   target_compile_definitions(signals2_tests PRIVATE SIGNALS_ENABLE_TEST_ACCESS)
   set_target_properties(signals2_tests PROPERTIES
-    CXX_STANDARD 14
+    CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
   )
@@ -28,7 +28,7 @@ if(SIGNALS2_BUILD_BENCHMARKS)
     benchmark::benchmark
   )
   set_target_properties(signals_benchmark PROPERTIES
-    CXX_STANDARD 14
+    CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
   )

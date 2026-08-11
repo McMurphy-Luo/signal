@@ -16,7 +16,7 @@ target_include_directories(
   "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
 
-target_compile_features(signals2 INTERFACE cxx_std_14)
+target_compile_features(signals2 INTERFACE cxx_std_20)
 
 if(SIGNALS2_BUILD_TESTS OR SIGNALS2_BUILD_BENCHMARKS)
   enable_testing()

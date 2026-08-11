@@ -1,5 +1,5 @@
 from conan import ConanFile
-from conan.tools.build import can_run
+from conan.tools.build import can_run, check_min_cppstd
 from conan.tools.cmake import CMake, CMakeDeps, CMakeToolchain, cmake_layout
 
 
@@ -7,7 +7,7 @@ class Signals2Conan(ConanFile):
     name = "signals2"
     package_type = "header-library"
     version = "0.1.0"
-    description = "Header-only C++ signals/slots-style library (namespace signals2)."
+    description = "Header-only C++20 signals/slots-style library (namespace signals2)."
     license = "MIT"
     url = "https://github.com/McMurphy-Luo/signal"
     homepage = "https://github.com/McMurphy-Luo/signal"
@@ -31,6 +31,9 @@ class Signals2Conan(ConanFile):
             self.test_requires("boost/1.88.0")
         if self.options.build_benchmarks:
             self.test_requires("benchmark/1.9.4")
+
+    def validate(self):
+        check_min_cppstd(self, "20")
 
     def layout(self):
         cmake_layout(self)
