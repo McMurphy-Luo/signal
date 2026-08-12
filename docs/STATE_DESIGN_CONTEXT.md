@@ -12,12 +12,17 @@
 | 文件 | 说明 |
 |---|---|
 | `include/signals/state.h` | 实现，header-only，依赖 `signals.h`（signals2） |
-| `test/state_test.cpp` | 15 组 Catch 行为测试，见 §7 |
+| `test/state_test.cpp` | 16 组 Catch 行为测试，见 §7 |
 | 本文档 | 设计上下文 |
 
 命名空间为 `signals2`，与 `signals.h` 同一个（早期迁移中曾用 `states`，已废弃）。
 
-验证状态：MSVC C++20 零警告编译通过，`signals2_tests` 全过（含 signals 侧共 31 组）。
+验证状态：MSVC C++20，`state.h` / `state_test.cpp` 零警告，`signals2_tests` 全过
+（含 signals 侧共 32 组）。
+
+注意"零警告"只覆盖本文档的两个交付物。整个测试树目前还有 2 条 C4834，都在
+`signals_test.cpp`（[55](../test/signals_test.cpp:55)、[385](../test/signals_test.cpp:385) 行）——
+那两处是**故意丢弃 connection 以验证"析构即断开"**，不是疏漏。
 
 ---
 
@@ -363,7 +368,8 @@ zUI 的 `Bind` 解决三个问题，逐条核对后**三个在这里都不成立
 | 10 ★ | 环形依赖不爆栈 | §2.7 |
 | 11 | `Peek` 不建立依赖 | 逃生口语义 |
 | 12 | `const Observable<T>&` 作参数（读） | §3.1 的替代方案 |
-| 12b | `const Observable<T>&` 上订阅（观察） | `Subscribe() const`，见 §3.1 末尾 |
+| 12b | `const Observable<T>&` 上订阅 callable | `Subscribe() const` 重载之一，见 §3.1 末尾 |
+| 12c | `const Observable<T>&` 上订阅成员函数 | `Subscribe() const` 重载之二（测试 4 走非 const，盖不住） |
 | 13 | observer 先死 | 生命周期方向一 |
 | 14 ★ | **State 先死、Computed 后死** | 生命周期方向二；signals2 的 `weak_ptr<signal_detail>` 兜底 |
 
@@ -385,7 +391,7 @@ zUI 的 `Bind` 解决三个问题，逐条核对后**三个在这里都不成立
 
 1. ~~**命名空间叫 `states`**~~ —— 已定为 `signals2`，与 `signals.h` 同一个。
 2. ~~**`state_test.cpp` 还是裸 main + 手写 check**~~ —— 已转成 Catch `TEST_CASE` 并接入
-   `signals2_tests`（本仓库用的是 Catch2 v2，不是原计划的 gtest）。
+   `signals2_tests`（本仓库用的是 Catch2 v3.15.3 amalgamated，不是原计划的 gtest）。
 3. **`signals.h` 缺 `#include <algorithm>`**（§4.6）—— 独立 bug，建议顺手修掉，修完 §4.6 的
    include 顺序约束就可以放松。
    （注意缺的是 **`signals.h`**：它在 `signal_detail::remove()` 里用 `std::find`。`state.h` 自己

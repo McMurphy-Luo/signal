@@ -254,6 +254,23 @@ TEST_CASE("const Observable<T>& can subscribe, not just read") {
   CHECK(from_computed == 12);
 }
 
+// ---- 12c. the member-function overload is const too ----
+TEST_CASE("const Observable<T>& can subscribe a member function") {
+  State<std::string> s(std::string("A"));
+  Label label;
+  ConnectionScope conns;
+
+  // Guards the second of the two const overloads: test 4 exercises the same
+  // call through a non-const State, so dropping the const there would still
+  // compile without this case.
+  const Observable<std::string>& handle = s;
+  conns.push_back(handle.Subscribe(&label, &Label::SetText, FireNow::Yes));
+  CHECK(label.text == "A");
+
+  s.Set(std::string("B"));
+  CHECK(label.text == "B");
+}
+
 // ---- 13. observer dies before the observed state ----
 TEST_CASE("An observer that dies with its connections is safe") {
   State<std::string> s(std::string("a"));

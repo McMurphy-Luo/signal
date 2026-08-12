@@ -1,7 +1,14 @@
 find_package(Boost CONFIG REQUIRED)
 
 if(SIGNALS2_BUILD_TESTS)
-  add_executable(signals2_tests main.cpp signals_test.cpp state_test.cpp catch_amalgamated.cpp catch_amalgamated.hpp)
+  add_executable(
+    signals2_tests
+    main.cpp
+    signals_test.cpp
+    state_test.cpp
+    catch_amalgamated.cpp
+    catch_amalgamated.hpp
+  )
   target_include_directories(signals2_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
   target_link_libraries(signals2_tests PRIVATE signals2::signals2 Boost::boost)
   target_compile_definitions(signals2_tests PRIVATE SIGNALS_ENABLE_TEST_ACCESS CATCH_AMALGAMATED_CUSTOM_MAIN)
