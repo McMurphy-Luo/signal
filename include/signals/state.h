@@ -161,10 +161,13 @@ public:
    * @param fire  FireNow::Yes invokes @p fn once with the current value first.
    * @return connection; the caller must keep it alive for the subscription to
    *         stay alive. Marked [[nodiscard]] -- dropping it is always a bug.
+   *
+   * const because `const Observable<T>&` is the read-only handle: a parameter
+   * of that type must be able to observe, not just read once.
    */
   template <typename F>
     requires std::invocable<F, const T&> || std::invocable<F>
-  [[nodiscard]] signals2::connection Subscribe(F&& fn, FireNow fire = FireNow::No) {
+  [[nodiscard]] signals2::connection Subscribe(F&& fn, FireNow fire = FireNow::No) const {
     // Only meaningful for std::function / function pointers; skipped for lambdas.
     if constexpr (requires { static_cast<bool>(fn); }) {
       if (!fn) {
@@ -195,7 +198,7 @@ public:
   template <typename C, typename M>
     requires std::is_member_function_pointer_v<M>
   [[nodiscard]] signals2::connection Subscribe(C* instance, M method,
-                                               FireNow fire = FireNow::No) {
+                                               FireNow fire = FireNow::No) const {
     if (!instance || !method) {
       return signals2::connection();
     }

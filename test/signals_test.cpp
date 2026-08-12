@@ -13,7 +13,7 @@
 // allocations to be of _CLIENT_BLOCK type
 #endif // _DEBUG
 
-#include "catch.hpp"
+#include "catch_amalgamated.hpp"
 
 #if defined(_DEBUG) || defined(SIGNALS_ENABLE_TEST_ACCESS)
 #define private public

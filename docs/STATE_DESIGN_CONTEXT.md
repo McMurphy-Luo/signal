@@ -1,4 +1,4 @@
-# `states::State` / `Computed` — 设计上下文与交接说明
+# `signals2::State` / `Computed` — 设计上下文与交接说明
 
 > 这份文档记录的是**代码里看不出来的东西**：为什么是这个形状、哪些"更自然"的写法是陷阱、
 > 哪些方案被明确否决过。代码本身能回答"是什么"，这里回答"为什么"和"别改成什么"。
@@ -11,11 +11,13 @@
 
 | 文件 | 说明 |
 |---|---|
-| `state.h` | 实现，header-only，依赖 `signals.h`（signals2） |
-| `state_test.cpp` | 14 组行为测试，见 §7 |
+| `include/signals/state.h` | 实现，header-only，依赖 `signals.h`（signals2） |
+| `test/state_test.cpp` | 15 组 Catch 行为测试，见 §7 |
 | 本文档 | 设计上下文 |
 
-验证状态：MSVC C++20 `/W4 /permissive-` 零警告编译通过，14 组测试全过。
+命名空间为 `signals2`，与 `signals.h` 同一个（早期迁移中曾用 `states`，已废弃）。
+
+验证状态：MSVC C++20 零警告编译通过，`signals2_tests` 全过（含 signals 侧共 31 组）。
 
 ---
 
@@ -157,7 +159,9 @@ zUI 的 `State(const std::function<T()>&)` 是构造即计算，它靠 `calc()` 
 
 `phone::State` 和 `zui::State` 都只靠"值收敛"隐式终止。真环会爆栈。测试 10 建了一个真环。
 
-断环时保留上一个一致的结果，不递归。
+断环时停在**最后一次算出来的值**，不递归。注意措辞：不是"上一个一致的结果"（早前的说法，是错的）——
+测试 10 那个环 `x = seed + y, y = x` 代入后是 `x = seed + x`，`seed ≠ 0` 时无解，
+**不存在**可停的一致状态。这里唯一的承诺是终止性，不是正确性。
 
 ### 2.8 `State::Get()` 返 `const T&`，不做 `operator T()`
 
@@ -221,6 +225,10 @@ zUI 的 `Bind` 解决三个问题，逐条核对后**三个在这里都不成立
 
 `Observable<T>` 顺手顶掉了 Bind 唯一成立的那个角色（只读句柄）：`const Observable<T>&` 作参数类型，
 `State` 和 `Computed` 都能传，零分配、返引用。
+
+两个 `Subscribe` 重载都是 **const**（`sig_` 是 `mutable`，见 §4.5）—— 这是上面那句成立的前提：
+只读句柄必须能"观察"，而不只是"读一次"。const 掉之后 `const Observable<T>&` 才是完整的观察者入口，
+否则拿到它的函数只能 `Get()`，还得把非 const 引用传下去，这个抽象就白给了。测试 12b 守着这条。
 
 ### 3.2 `ScopedConnections` RAII 容器 —— 不做
 
@@ -337,7 +345,9 @@ zUI 的 `Bind` 解决三个问题，逐条核对后**三个在这里都不成立
 
 ## 7. 测试矩阵
 
-`state_test.cpp`，14 组。带 ★ 的是守护 §4 不变量的，重构后必须仍然通过。
+`test/state_test.cpp`，15 组 Catch `TEST_CASE`，链进 `signals2_tests`。带 ★ 的是守护 §4 不变量的，
+重构后必须仍然通过。表里的编号对应源文件里的 `// ---- N. ----` 注释（Catch 用例名是描述性的，
+不带编号）。
 
 | # | 场景 | 守护什么 |
 |---|---|---|
@@ -352,22 +362,34 @@ zUI 的 `Bind` 解决三个问题，逐条核对后**三个在这里都不成立
 | 9 | 无 `operator==` 的类型 | §2.5 |
 | 10 ★ | 环形依赖不爆栈 | §2.7 |
 | 11 | `Peek` 不建立依赖 | 逃生口语义 |
-| 12 | `const Observable<T>&` 作参数 | §3.1 的替代方案 |
+| 12 | `const Observable<T>&` 作参数（读） | §3.1 的替代方案 |
+| 12b | `const Observable<T>&` 上订阅（观察） | `Subscribe() const`，见 §3.1 末尾 |
 | 13 | observer 先死 | 生命周期方向一 |
 | 14 ★ | **State 先死、Computed 后死** | 生命周期方向二；signals2 的 `weak_ptr<signal_detail>` 兜底 |
 
-测试 14 是最重要的一条 —— 它验证了 §3.1"不需要 `Ref`"的核心论断：依赖的 State 销毁后，
-`Computed` 保留最后的值且不崩。
+**这两条的覆盖力比看上去弱，别当保险：**
+
+- **测试 10** 只断言"跑完了没爆栈"。那个环 `x = seed + y, y = x` 代入后是 `x = seed + x`，
+  `seed ≠ 0` 时**根本没有不动点**，所以没有正确值可断言 —— 它只是终止性测试。
+  （§2.7 早前写的"保留上一个一致的结果"是错的，已更正。）
+- **测试 14** 只覆盖了**读缓存值**这条路径。那个 compute 函数捕获的 `&tmp` 在块结束后已经悬空，
+  测试之后从没再执行过它 —— 因为 `tmp` 一死，它的 signal 也没了，没人能触发重算。
+  真调 `c.Recompute()` 就是 UB。危险形态是"长命依赖 A + 短命依赖 B，B 先死，之后 A 变化触发重算"
+  —— 这条路径没有测试守着。**规则：`Computed` 不得比它的 compute 函数能读到的任何 State 活得久。**
+  §3.1 否决 `Ref<T>` 的整个论证就站在这条规则上，但那里只是把它当成对现状的观察陈述，
+  没有作为使用者必须遵守的前置条件写出来。
 
 ---
 
 ## 8. 待办 / 悬而未决
 
-1. **命名空间叫 `states`** —— 当初选它是为了与 `signals` 并列。迁到独立库后可能有更合适的名字，
-   改是一次全局替换。
-2. **`state_test.cpp` 还是裸 main + 手写 check**，需要接到新库的测试框架（原计划是 gtest）。
+1. ~~**命名空间叫 `states`**~~ —— 已定为 `signals2`，与 `signals.h` 同一个。
+2. ~~**`state_test.cpp` 还是裸 main + 手写 check**~~ —— 已转成 Catch `TEST_CASE` 并接入
+   `signals2_tests`（本仓库用的是 Catch2 v2，不是原计划的 gtest）。
 3. **`signals.h` 缺 `#include <algorithm>`**（§4.6）—— 独立 bug，建议顺手修掉，修完 §4.6 的
    include 顺序约束就可以放松。
+   （注意缺的是 **`signals.h`**：它在 `signal_detail::remove()` 里用 `std::find`。`state.h` 自己
+   include 了 `<algorithm>`，恰恰是那个挡箭牌。）
 4. **原 `zPhoneUI` 的 26+2 个调用点还没迁**（§6），以及原 `State.h`/`State.inl` 的删除。
 5. **§5.1 双向绑定**和**§5.3 批量提交**是两个已知的功能缺口，都有明确的"正确方向"记录在案，
    等真实需求出现再做。
