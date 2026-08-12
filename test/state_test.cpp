@@ -44,7 +44,7 @@ TEST_CASE("State notifies only on a real change") {
   State<int> s(1);
   int calls = 0;
   int last = 0;
-  ConnectionScope conns;
+  std::vector<signals2::connection> conns;
   conns.push_back(s.Subscribe([&](int v) { ++calls; last = v; }));
 
   s.Set(2);
@@ -61,18 +61,18 @@ TEST_CASE("State notifies only on a real change") {
 TEST_CASE("FireNow::Yes invokes the callback immediately") {
   State<std::string> s(std::string("hello"));
   std::string seen;
-  ConnectionScope conns;
+  std::vector<signals2::connection> conns;
   conns.push_back(
       s.Subscribe([&](const std::string& v) { seen = v; }, FireNow::Yes));
   CHECK(seen == "hello");
 }
 
 // ---- 3. connection lifetime: scope dies -> no more callbacks ----
-TEST_CASE("ConnectionScope disconnects on destruction") {
+TEST_CASE("A connection vector disconnects on destruction") {
   State<int> s(0);
   int calls = 0;
   {
-    ConnectionScope conns;
+    std::vector<signals2::connection> conns;
     conns.push_back(s.Subscribe([&](int) { ++calls; }));
     s.Set(1);
   }
@@ -85,7 +85,7 @@ TEST_CASE("Subscribe accepts member functions and zero-arg callables") {
   State<std::string> title(std::string("A"));
   State<bool> vis(false);
   Label label;
-  ConnectionScope conns;
+  std::vector<signals2::connection> conns;
 
   conns.push_back(title.Subscribe(&label, &Label::SetText, FireNow::Yes));
   conns.push_back(vis.Subscribe(&label, &Label::SetVisible, FireNow::Yes));
@@ -102,7 +102,7 @@ TEST_CASE("Subscribe accepts member functions and zero-arg callables") {
 
   // method whose parameter type the value only converts to
   Label converted;
-  ConnectionScope conv_conns;
+  std::vector<signals2::connection> conv_conns;
   conv_conns.push_back(
       title.Subscribe(&converted, &Label::SetTextView, FireNow::Yes));
   CHECK(converted.text == "C");
@@ -120,7 +120,7 @@ TEST_CASE("Computed discovers its dependencies automatically") {
   full.Bind([&] { return first.Get() + " " + last.Get(); });
   CHECK(full.Get() == "Ada Lovelace");
 
-  ConnectionScope conns;
+  std::vector<signals2::connection> conns;
   conns.push_back(full.Subscribe([&](const std::string&) { ++notifies; }));
 
   first.Set(std::string("Grace"));
@@ -169,7 +169,7 @@ TEST_CASE("Computed tracks a new branch and tolerates stale dependencies") {
 TEST_CASE("Mutate edits in place and always notifies") {
   State<std::vector<int>> list;
   int calls = 0;
-  ConnectionScope conns;
+  std::vector<signals2::connection> conns;
   conns.push_back(list.Subscribe([&](const std::vector<int>&) { ++calls; }));
 
   list.Mutate([](std::vector<int>& v) { v.push_back(1); });
@@ -182,7 +182,7 @@ TEST_CASE("Mutate edits in place and always notifies") {
 TEST_CASE("A non-equality-comparable T compiles and notifies every Set") {
   State<NoEq> s;
   int calls = 0;
-  ConnectionScope conns;
+  std::vector<signals2::connection> conns;
   conns.push_back(s.Subscribe([&](const NoEq&) { ++calls; }));
 
   s.Set(NoEq{1});
@@ -237,7 +237,7 @@ TEST_CASE("const Observable<T>& can subscribe, not just read") {
 
   int from_state = 0;
   int from_computed = 0;
-  ConnectionScope conns;
+  std::vector<signals2::connection> conns;
 
   // Takes the read-only handle by const reference, exactly as the docs
   // recommend for a function that only observes.
@@ -258,7 +258,7 @@ TEST_CASE("const Observable<T>& can subscribe, not just read") {
 TEST_CASE("const Observable<T>& can subscribe a member function") {
   State<std::string> s(std::string("A"));
   Label label;
-  ConnectionScope conns;
+  std::vector<signals2::connection> conns;
 
   // Guards the second of the two const overloads: test 4 exercises the same
   // call through a non-const State, so dropping the const there would still
@@ -276,7 +276,7 @@ TEST_CASE("An observer that dies with its connections is safe") {
   State<std::string> s(std::string("a"));
   {
     Label label;
-    ConnectionScope conns;
+    std::vector<signals2::connection> conns;
     conns.push_back(s.Subscribe(&label, &Label::SetText, FireNow::Yes));
     s.Set(std::string("b"));
     CHECK(label.text == "b");

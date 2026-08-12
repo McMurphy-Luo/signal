@@ -235,7 +235,7 @@ zUI 的 `Bind` 解决三个问题，逐条核对后**三个在这里都不成立
 只读句柄必须能"观察"，而不只是"读一次"。const 掉之后 `const Observable<T>&` 才是完整的观察者入口，
 否则拿到它的函数只能 `Get()`，还得把非 const 引用传下去，这个抽象就白给了。测试 12b 守着这条。
 
-### 3.2 `ScopedConnections` RAII 容器 —— 不做
+### 3.2 `ScopedConnections` RAII 容器 —— 不做（连别名也不留）
 
 比 `std::vector<signals2::connection>` 多给的东西趋近于零：
 
@@ -245,7 +245,12 @@ zUI 的 `Bind` 解决三个问题，逐条核对后**三个在这里都不成立
 - `operator+=` 比 `emplace_back` 短 —— 化妆。
 
 原本的论证是"让正确写法比错误写法省事"，但**删掉 `SetUpdate` 那族之后就没有错误写法了**，
-`[[nodiscard]]` 会逼你接住返回值。论证自己塌了。只保留一个 `using ConnectionScope = std::vector<...>` 别名。
+`[[nodiscard]]` 会逼你接住返回值。论证自己塌了。
+
+早前的折中是保留一个 `using ConnectionScope = std::vector<signals2::connection>` 别名，
+**现在连这个也删掉了**：同一个论证对别名一样成立 —— 它不增加任何保证，只是给一个人人都认识的
+标准容器换了个只在本库里存在的名字，读代码的人还得回头查它到底是什么。直接写
+`std::vector<signals2::connection>`。
 
 （附：**vector 扩容对 connection 是安全的** —— `connection` 只有一个 `unique_ptr` 指向堆上的
 `signal_slot_connection`，signal 侧注册的是指向堆上 `the_slot` 的裸指针，移动外层不影响堆对象地址。）
@@ -358,7 +363,7 @@ zUI 的 `Bind` 解决三个问题，逐条核对后**三个在这里都不成立
 |---|---|---|
 | 1 | Set / Subscribe / 相等性门禁 / `operator=` | 基本语义 |
 | 2 | `FireNow::Yes` 立即触发 | 初始同步 |
-| 3 | `ConnectionScope` 析构后不再回调 | connection RAII |
+| 3 | `std::vector<connection>` 析构后不再回调 | connection RAII |
 | 4 | 成员函数重载 + 隐式转换 + 零参可调用对象 | 单个 `Subscribe` 重载覆盖多签名 |
 | 5 | Computed 自动依赖发现（2 个依赖） | §2.2 |
 | 6 | 链式 computed（A → B → C） | 嵌套追踪栈（§2.2） |

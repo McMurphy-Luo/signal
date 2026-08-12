@@ -5,6 +5,7 @@
 #include <signals/state.h>
 
 #include <string>
+#include <vector>
 
 int main() {
   signals2::signal2<void, int> signal;
@@ -25,7 +26,7 @@ int main() {
 
   std::string seen;
   const signals2::Observable<std::string>& handle = label;
-  signals2::ConnectionScope conns;
+  std::vector<signals2::connection> conns;
   conns.push_back(handle.Subscribe(
       [&seen](const std::string& value) { seen = value; },
       signals2::FireNow::Yes));

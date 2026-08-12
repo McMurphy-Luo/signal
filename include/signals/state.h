@@ -26,9 +26,11 @@
  *   model_.raw_quality.Set(4.5f);       // quality_text recomputes, label_ refreshes
  *
  * Lifetime: a Subscribe() call returns a connection; whoever owns the callback
- * target must own that connection. Store them in a member vector and they are
- * disconnected on destruction. Never store a connection in the object being
- * observed -- that ties the subscription to the wrong lifetime.
+ * target must own that connection. Store them in a plain
+ * std::vector<signals2::connection> member -- connection is move-only, so the
+ * vector is non-copyable, and everything disconnects on destruction. Never
+ * store a connection in the object being observed -- that ties the
+ * subscription to the wrong lifetime.
  *
  * Threading: not thread-safe, like signals2 itself. Use from a single thread
  * (in practice, the UI thread).
@@ -64,10 +66,6 @@ namespace signals2 {
 
 /// Whether Subscribe() invokes the callback once with the current value.
 enum class FireNow { No, Yes };
-
-/// Convenience owner for subscriptions. Plain vector -- connections disconnect
-/// on destruction, and connection is move-only so the vector is non-copyable.
-using ConnectionScope = std::vector<signals2::connection>;
 
 namespace detail {
 
