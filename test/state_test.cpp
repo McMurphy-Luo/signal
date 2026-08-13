@@ -11,6 +11,7 @@
 
 #include <signals/state.h>
 
+#include <algorithm>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -190,18 +191,23 @@ TEST_CASE("A non-equality-comparable T compiles and notifies every Set") {
   CHECK(calls == 2);
 }
 
-// ---- 10. cycle does not blow the stack -- invariant §2.7 ----
-TEST_CASE("A dependency cycle terminates instead of recursing") {
+// ---- 10. converging feedback terminates on the equality check -- §2.7 ----
+TEST_CASE("Feedback that settles converges to its fixed point") {
+  // x and y feed each other, but x saturates, so the loop has a fixed point
+  // and the equality check stops it. Divergent feedback is NOT covered here
+  // and is not covered anywhere: it exhausts the stack by design. See §2.7.
   State<int> seed(1);
   Computed<int> x;
   Computed<int> y;
-  x.Bind([&] { return seed.Get() + y.Get(); });
+  x.Bind([&] { return std::min(seed.Get() + y.Get(), 10); });
   y.Bind([&] { return x.Get(); });
 
-  seed.Set(2);  // must terminate
-  // NOTE: this only asserts termination. The cycle has no fixed point, so
-  // there is no correct value to check here -- see docs §2.7.
-  SUCCEED("cycle terminated without recursing");
+  CHECK(x.Get() == 10);
+  CHECK(y.Get() == 10);
+
+  seed.Set(2);
+  CHECK(x.Get() == 10);
+  CHECK(y.Get() == 10);
 }
 
 // ---- 11. Peek does not create a dependency ----
@@ -300,4 +306,46 @@ TEST_CASE("Computed keeps its last value after a dependency is destroyed") {
   // function after tmp died would read a dangling reference -- a Computed must
   // not outlive any state its compute function can reach.
   CHECK(c.Get() == 10);
+}
+
+// ---- 15. a subscriber writes a dependency -- invariant §2.7 ----
+TEST_CASE("A subscriber that corrects a dependency is honoured, not dropped") {
+  State<int> src(1);
+  Computed<int> doubled;
+  doubled.Bind([&] { return src.Get() * 2; });
+
+  std::vector<signals2::connection> conns;
+  conns.push_back(doubled.Subscribe([&](int v) {
+    if (v < 10) {
+      src.Set(v + 100);  // one-shot correction from inside the notification
+    }
+  }));
+
+  src.Set(2);
+  // The nested recompute triggered by the correction must land. Before the
+  // epoch rule this stopped at 4 -- src had moved to 104 and the derived value
+  // never caught up.
+  CHECK(src.Get() == 104);
+  CHECK(doubled.Get() == 208);
+}
+
+// ---- 16. calc writes a dependency it already read -- invariant §2.7 ----
+TEST_CASE("A superseded compute pass does not commit its stale result") {
+  State<int> a(1);
+  State<int> b(1);
+  Computed<int> c;
+
+  c.Bind([&] {
+    int va = a.Get();
+    int vb = b.Get();  // read, so the write below reenters Recompute
+    if (vb < 5) {
+      b.Set(vb + 10);
+    }
+    return va + vb;  // computed from the value of b *before* the write
+  });
+
+  // The nested pass sees b == 11 and stores 12. This outer pass must then
+  // discard its own result rather than overwrite 12 with 1 + 1.
+  CHECK(b.Get() == 11);
+  CHECK(c.Get() == 12);
 }

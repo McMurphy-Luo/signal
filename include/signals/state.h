@@ -35,6 +35,16 @@
  * Threading: not thread-safe, like signals2 itself. Use from a single thread
  * (in practice, the UI thread).
  *
+ * Cycles: a Computed whose own output feeds back into one of its dependencies
+ * is a usage error. Feedback that settles is fine -- Set() and Recompute()
+ * both stop once the value stops changing, so a self-correcting subscriber
+ * (clamping, normalising) converges and is supported. Feedback that does not
+ * settle recurses until the stack is exhausted; that includes a plain cycle
+ * such as `x = seed + y; y = x`, which diverges as soon as it is bound. This
+ * class does not detect that case, and deliberately does not paper over it by
+ * dropping updates: dropping them yields a silently wrong value, which is far
+ * harder to find than a crash at the point of the mistake.
+ *
  * Known limitations:
  *
  * - No two-way binding. There is deliberately no "set without notifying", so
@@ -104,18 +114,6 @@ public:
 
   TrackScope(const TrackScope&) = delete;
   TrackScope& operator=(const TrackScope&) = delete;
-};
-
-class FlagGuard {
-public:
-  explicit FlagGuard(bool& flag) : flag_(flag) { flag_ = true; }
-  ~FlagGuard() { flag_ = false; }
-
-  FlagGuard(const FlagGuard&) = delete;
-  FlagGuard& operator=(const FlagGuard&) = delete;
-
-private:
-  bool& flag_;
 };
 
 }  // namespace detail
@@ -312,14 +310,25 @@ public:
    * Called automatically when a tracked dependency changes. Call it manually
    * when the value also depends on something outside this system -- a resource
    * string that changes on language switch, for instance.
+   *
+   * Reentrancy: a dependency may change while this is running -- from inside
+   * calc_ itself, or from a subscriber during Emit(). That triggers a nested
+   * Recompute(), which is allowed to run: it reads fresher inputs than we did,
+   * so its result supersedes ours. The epoch check below is what makes that
+   * safe -- without it, this frame would unwind and overwrite the nested
+   * (newer) result with a value computed from inputs that no longer hold.
+   *
+   * Nothing here bounds the recursion. Feedback that converges terminates on
+   * the equality check; feedback that does not converge exhausts the stack.
+   * See "Cycles" in the file header -- that is a usage error, not a case this
+   * class recovers from.
    */
   void Recompute() {
-    if (!calc_ || recomputing_) {
-      // recomputing_ breaks dependency cycles: the value stays at the last
-      // consistent result instead of recursing.
+    if (!calc_) {
       return;
     }
-    detail::FlagGuard guard(recomputing_);
+    // Claim an epoch for this pass. Any nested Recompute() claims a later one.
+    const unsigned long long started = ++epoch_;
 
     // The immediately-invoked lambda ends the tracking scope before the value
     // is stored and subscribers run. Otherwise a subscriber's Get() calls would
@@ -328,6 +337,13 @@ public:
       detail::TrackScope scope(this);
       return static_cast<T>(calc_());
     }();
+
+    if (epoch_ != started) {
+      // A nested pass ran to completion underneath us. Our inputs are stale;
+      // committing `next` now would be a lost update. Drop it silently -- the
+      // nested pass already stored the value and notified.
+      return;
+    }
 
     if constexpr (std::equality_comparable<T>) {
       if (this->value_ == next) {
@@ -364,7 +380,7 @@ private:
   std::function<T()> calc_;
   std::vector<signals2::connection> deps_;
   std::vector<const void*> tracked_;
-  bool recomputing_ = false;
+  unsigned long long epoch_ = 0;
 };
 
 }  // namespace signals2
