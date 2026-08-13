@@ -8,8 +8,8 @@
  *
  * Public surface:
  *   Observable<T>  read-only interface; use as a parameter type
- *   State<T>       writable source of truth
- *   Computed<T>    read-only derived value, dependencies discovered automatically
+ *   State<T, Equal>    writable source of truth
+ *   Computed<T, Equal> read-only derived value, dependencies discovered automatically
  *   FireNow        whether Subscribe() invokes the callback once immediately
  *
  * Example:
@@ -220,31 +220,36 @@ protected:
 /**
  * @brief Writable observable value.
  *
- * Set() notifies only when the value actually changes, and only when T is
- * equality comparable -- unlike a hard-coded operator!=, a T without == still
- * compiles and simply notifies every time.
+ * Set() notifies only when Equal considers the new value different. Equal is
+ * stored in the State and defaults to std::equal_to<>. A T without operator==
+ * must provide an explicit equality predicate.
  */
-template <typename T>
+template <typename T, typename Equal = std::equal_to<>>
+  requires std::predicate<Equal&, const T&, const T&>
 class State final : public Observable<T> {
 public:
-  State() = default;
-  explicit State(T init) : Observable<T>(std::move(init)) {}
+  State()
+    requires std::default_initializable<Equal>
+  = default;
+
+  explicit State(T init)
+    requires std::default_initializable<Equal>
+      : Observable<T>(std::move(init)) {}
+
+  State(T init, Equal equal)
+      : Observable<T>(std::move(init)), equal_(std::move(equal)) {}
 
   void Set(const T& value) {
-    if constexpr (std::equality_comparable<T>) {
-      if (this->value_ == value) {
-        return;
-      }
+    if (std::invoke(equal_, this->value_, value)) {
+      return;
     }
     this->value_ = value;
     this->Emit();
   }
 
   void Set(T&& value) {
-    if constexpr (std::equality_comparable<T>) {
-      if (this->value_ == value) {
-        return;
-      }
+    if (std::invoke(equal_, this->value_, value)) {
+      return;
     }
     this->value_ = std::move(value);
     this->Emit();
@@ -272,6 +277,9 @@ public:
     Set(std::move(value));
     return *this;
   }
+
+private:
+  [[no_unique_address]] Equal equal_{};
 };
 
 /**
@@ -284,10 +292,15 @@ public:
  * Binding is deferred rather than done in the constructor so that member
  * declaration order inside a model struct does not become load-bearing.
  */
-template <typename T>
+template <typename T, typename Equal = std::equal_to<>>
+  requires std::predicate<Equal&, const T&, const T&>
 class Computed final : public Observable<T>, private detail::ITracker {
 public:
-  Computed() = default;
+  Computed()
+    requires std::default_initializable<Equal>
+  = default;
+
+  explicit Computed(Equal equal) : equal_(std::move(equal)) {}
 
   /**
    * @brief Set the compute function and evaluate it immediately.
@@ -345,10 +358,8 @@ public:
       return;
     }
 
-    if constexpr (std::equality_comparable<T>) {
-      if (this->value_ == next) {
-        return;
-      }
+    if (std::invoke(equal_, this->value_, next)) {
+      return;
     }
     this->value_ = std::move(next);
     this->Emit();
@@ -377,6 +388,7 @@ private:
     return true;
   }
 
+  [[no_unique_address]] Equal equal_{};
   std::function<T()> calc_;
   std::vector<signals2::connection> deps_;
   std::vector<const void*> tracked_;

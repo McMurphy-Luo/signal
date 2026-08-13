@@ -12,13 +12,13 @@
 | 文件 | 说明 |
 |---|---|
 | `include/signals/state.h` | 实现，header-only，依赖 `signals.h`（signals2） |
-| `test/state_test.cpp` | 18 组 Catch 行为测试，见 §7 |
+| `test/state_test.cpp` | 19 组 Catch 行为测试，见 §7 |
 | 本文档 | 设计上下文 |
 
 命名空间为 `signals2`，与 `signals.h` 同一个（早期迁移中曾用 `states`，已废弃）。
 
 验证状态：MSVC C++20，`state.h` / `state_test.cpp` 零警告，`signals2_tests` 全过
-（含 signals 侧共 34 组）。
+（含 signals 侧共 35 组）。
 
 注意"零警告"只覆盖本文档的两个交付物。整个测试树目前还有 2 条 C4834，都在
 `signals_test.cpp`（[55](../test/signals_test.cpp:55)、[385](../test/signals_test.cpp:385) 行）——
@@ -145,10 +145,21 @@ T next = [this] {
 
 zUI 的 `calc()` 没有这层隔离 —— 试跑完直接赋值。
 
-### 2.5 相等性判断用 `if constexpr (std::equality_comparable<T>)`
+### 2.5 相等性是对象级 BinaryPred 策略
 
-不是硬写 `!=`。没有 `==` 的类型照样能实例化，只是每次都通知（测试 9）。这比"编不过"和"沉默地
-用错误的比较语义"都好。
+`State<T, Equal>` 和 `Computed<T, Equal>` 把等价判断作为模板策略保存，默认是
+`std::equal_to<>`，并要求它满足 `std::predicate<Equal&, const T&, const T&>`。比较策略在对象整个
+生命周期内保持一致，这一点更像 `std::map` 的 `Compare`，而不是每次调用都传 predicate 的
+`std::unique`。
+
+默认策略要求 `T` 支持 `operator==`。没有自然相等语义或不能修改的第三方类型必须显式提供比较器
+（测试 9）；有状态比较器同样受支持（测试 9b）。空比较器用 `[[no_unique_address]]` 保存，通常不增加
+对象大小。`Observable<T>` 不携带 Equal，因此使用不同比较策略的 State / Computed 仍能统一转换成
+`const Observable<T>&`。
+
+Equal 返回 `true` 表示两个值属于同一个等价类：新值会被丢弃，既不保存也不通知。这不是
+"保存但静默"；后者会让依赖它的 Computed 与 State 当前值失去同步。比较器应当稳定、无副作用，并尽量
+满足等价关系。
 
 ### 2.6 `Computed::Bind()` 延迟绑定，不在构造函数里计算
 
@@ -432,7 +443,7 @@ debug 下默认 assert）。注意它**只管活性，不碰正确性** —— e
 
 ## 7. 测试矩阵
 
-`test/state_test.cpp`，15 组 Catch `TEST_CASE`，链进 `signals2_tests`。带 ★ 的是守护 §4 不变量的，
+`test/state_test.cpp`，19 组 Catch `TEST_CASE`，链进 `signals2_tests`。带 ★ 的是守护 §4 不变量的，
 重构后必须仍然通过。表里的编号对应源文件里的 `// ---- N. ----` 注释（Catch 用例名是描述性的，
 不带编号）。
 
@@ -446,7 +457,8 @@ debug 下默认 assert）。注意它**只管活性，不碰正确性** —— e
 | 6 | 链式 computed（A → B → C） | 嵌套追踪栈（§2.2） |
 | 7 ★ | 条件依赖分支切换 + 旧依赖变化无害 | §2.3 只增不减 |
 | 8 | 容器上的 `Mutate` | 原地修改 + 无条件通知 |
-| 9 | 无 `operator==` 的类型 | §2.5 |
+| 9 | 无 operator== 的类型显式提供 BinaryPred | §2.5 严格默认策略 |
+| 9b | Computed 保存有状态 BinaryPred | §2.5 对象级比较策略 |
 | 10 ★ | 收敛的反馈环停在不动点 | §2.7 相等性门禁即终止判据 |
 | 11 | `Peek` 不建立依赖 | 逃生口语义 |
 | 12 | `const Observable<T>&` 作参数（读） | §3.1 的替代方案 |
@@ -457,12 +469,8 @@ debug 下默认 assert）。注意它**只管活性，不碰正确性** —— e
 | 15 ★ | 订阅者回写依赖 → 嵌套重算落地 | §2.7 epoch；旧方案这里停在 4（应 208）|
 | 16 ★ | 作废的计算结果不许提交 | §2.7 epoch；旧方案这里停在 2（应 12）|
 
-**这两条的覆盖力比看上去弱，别当保险：**
-
-- **测试 10** 只断言"跑完了没爆栈"。那个环 `x = seed + y, y = x` 代入后是 `x = seed + x`，
-  `seed ≠ 0` 时**根本没有不动点**，所以没有正确值可断言 —— 它只是终止性测试。
-  （§2.7 早前写的"保留上一个一致的结果"是错的，已更正。）
-- **测试 14** 只覆盖了**读缓存值**这条路径。那个 compute 函数捕获的 `&tmp` 在块结束后已经悬空，
+**测试 14 的覆盖力比看上去弱，别当保险：**它只覆盖了**读缓存值**这条路径。那个 compute 函数捕获的
+`&tmp` 在块结束后已经悬空，
   测试之后从没再执行过它 —— 因为 `tmp` 一死，它的 signal 也没了，没人能触发重算。
   真调 `c.Recompute()` 就是 UB。危险形态是"长命依赖 A + 短命依赖 B，B 先死，之后 A 变化触发重算"
   —— 这条路径没有测试守着。**规则：`Computed` 不得比它的 compute 函数能读到的任何 State 活得久。**

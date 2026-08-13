@@ -33,10 +33,33 @@ public:
   int hits = 0;
 };
 
-// A type with no operator== -- must still compile.
+// A type with no operator==. Scheme A requires an explicit predicate.
 struct NoEq {
   int a = 0;
 };
+
+struct NoEqEqual {
+  bool operator()(const NoEq& lhs, const NoEq& rhs) const noexcept {
+    return lhs.a == rhs.a;
+  }
+};
+
+struct ModuloEqual {
+  explicit ModuloEqual(int value) : divisor(value) {}
+
+  bool operator()(int lhs, int rhs) const noexcept {
+    return lhs % divisor == rhs % divisor;
+  }
+
+  int divisor;
+};
+
+template <typename T>
+concept HasDefaultState = requires { typename State<T>; };
+
+static_assert(HasDefaultState<int>);
+static_assert(!HasDefaultState<NoEq>);
+static_assert(!std::default_initializable<ModuloEqual>);
 
 }  // namespace
 
@@ -179,16 +202,39 @@ TEST_CASE("Mutate edits in place and always notifies") {
   CHECK(calls == 2);
 }
 
-// ---- 9. type without operator== still compiles ----
-TEST_CASE("A non-equality-comparable T compiles and notifies every Set") {
-  State<NoEq> s;
+// ---- 9. a type without operator== supplies an explicit BinaryPred ----
+TEST_CASE("State accepts an explicit equality predicate") {
+  State<NoEq, NoEqEqual> s(NoEq{1});
   int calls = 0;
   std::vector<signals2::connection> conns;
   conns.push_back(s.Subscribe([&](const NoEq&) { ++calls; }));
 
-  s.Set(NoEq{1});
-  s.Set(NoEq{1});  // no ==, so notifies every time
-  CHECK(calls == 2);
+  s.Set(NoEq{1});  // predicate says equal -> retain the old value, no notify
+  CHECK(calls == 0);
+
+  s.Set(NoEq{2});
+  CHECK(s.Get().a == 2);
+  CHECK(calls == 1);
+}
+
+// ---- 9b. Computed stores and uses a stateful equality predicate ----
+TEST_CASE("Computed accepts a stateful equality predicate") {
+  State<int> source(1);
+  Computed<int, ModuloEqual> computed(ModuloEqual{2});
+  computed.Bind([&] { return source.Get(); });
+  CHECK(computed.Get() == 1);
+
+  int calls = 0;
+  std::vector<signals2::connection> conns;
+  conns.push_back(computed.Subscribe([&](int) { ++calls; }));
+
+  source.Set(3);  // equivalent modulo 2: keep the previously stored value
+  CHECK(computed.Get() == 1);
+  CHECK(calls == 0);
+
+  source.Set(4);  // a different equivalence class: commit and notify
+  CHECK(computed.Get() == 4);
+  CHECK(calls == 1);
 }
 
 // ---- 10. converging feedback terminates on the equality check -- §2.7 ----
