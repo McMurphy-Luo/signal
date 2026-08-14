@@ -93,12 +93,12 @@ namespace signals2
 
       }
 
-      virtual bool connected() = 0;
+      virtual bool connected() const = 0;
     };
 
     template<typename F>
     class signal_detail;
-    
+
     template<typename F>
     using slot2 = std::function<F>;
 
@@ -396,16 +396,20 @@ namespace signals2
         return connections_;
       }
 
-      void connect(slot2<F>* s) {
-        connections_.push_back(s);
+      void connect(slot2<F>* slot) {
+        connections_.push_back(slot);
       }
 
       void invalid() {
         lock_->invalid();
       }
 
-      void remove(slot2<F>* v) {
-        connections_.erase(std::find(connections_.begin(), connections_.end(), v));
+      void remove(slot2<F>* slot) {
+        typename std::vector<slot2<F>*>::iterator it =
+          std::find(connections_.begin(), connections_.end(), slot);
+        if (it != connections_.end()) {
+          connections_.erase(it);
+        }
       }
 
       bool locked() {
@@ -445,7 +449,7 @@ namespace signals2
         disconnect();
       }
 
-      bool connected() override {
+      bool connected() const override {
         return !the_signal.expired();
       }
 
@@ -490,7 +494,7 @@ namespace signals2
         , std::forward_as_tuple(std::forward<Args>(args)...));
     }
 
-    // https://en.cppreference.com/w/cpp/types/conditional 
+    // https://en.cppreference.com/w/cpp/types/conditional
     template<class...> struct conjunction : std::true_type {};
     template<class B1> struct conjunction<B1> : B1 {};
     template<class B1, class... Bn>
@@ -527,7 +531,7 @@ namespace signals2
 
     void disconnect() { connection_detail_.reset(); }
 
-    bool connected() { return connection_detail_ && connection_detail_->connected(); }
+    bool connected() const { return connection_detail_ && connection_detail_->connected(); }
 
   private:
     std::unique_ptr<detail::connection_internal_base> connection_detail_;
@@ -623,7 +627,9 @@ namespace signals2
       }
       std::weak_ptr<detail::signal_detail<function_type>> alive = signal_detail_;
       const_iterator it = cbegin();
-      while (it != cend()) {
+      // Connections added by a callback start receiving on the next emission.
+      const_iterator end_it = cend();
+      while (it != end_it) {
         if (*it) {
           (*it)(param...);
           if (alive.expired()) {

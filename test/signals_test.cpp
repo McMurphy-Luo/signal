@@ -130,6 +130,7 @@ TEST_CASE("Test signal disconnect during execution") {
   });
   signal_no_arguments();
   CHECK(slot_2_called_times == 0);
+
 }
 
 TEST_CASE("Test boost connect during execution") {
@@ -141,13 +142,26 @@ TEST_CASE("Test boost connect during execution") {
   signal_no_arguments();
 }
 
-TEST_CASE("Test signal connect during execution") {
+TEST_CASE("A slot connected during emission starts with the next emission") {
   signals2::signal2<void> signal_no_arguments;
-  int slot_0_called_times = 0;
-  signals2::connection conn_out = signal_no_arguments.connect([&signal_no_arguments, &conn_out]() {
-    conn_out = signal_no_arguments.connect([]() {});
-  });
+  int first_slot_calls = 0;
+  int new_slot_calls = 0;
+  std::vector<signals2::connection> connections;
+  connections.push_back(signal_no_arguments.connect([&] {
+    ++first_slot_calls;
+    if (connections.size() == 1) {
+      connections.push_back(
+          signal_no_arguments.connect([&] { ++new_slot_calls; }));
+    }
+  }));
+
   signal_no_arguments();
+  CHECK(first_slot_calls == 1);
+  CHECK(new_slot_calls == 0);
+
+  signal_no_arguments();
+  CHECK(first_slot_calls == 2);
+  CHECK(new_slot_calls == 1);
 }
 
 TEST_CASE("Test signal iterator 1") {
@@ -375,7 +389,7 @@ TEST_CASE("Test slot resource management and termination") {
 class Foo {
 public:
   void foo(int, const long&) {
-    
+
   }
 };
 
@@ -397,7 +411,8 @@ TEST_CASE("Test connect while triggering") {
   b_conn = b_signal.connect(b_lambda);
   int b = 0;
   b_signal(b);
-  
+  CHECK(b == 1);
+
   signals2::signal2<void, int&> s_signal;
   signals2::connection s_conn;
   std::function<void(int&)> s_lambda = [&s_signal, &s_lambda, &s_conn](int& v) {
@@ -410,7 +425,9 @@ TEST_CASE("Test connect while triggering") {
   s_conn = s_signal.connect(s_lambda);
   int s = 0;
   s_signal(s);
-  CHECK(s == 99);
+  CHECK(s == 1);
+  s_signal(s);
+  CHECK(s == 2);
 }
 
 TEST_CASE("Test connected") {
@@ -432,7 +449,8 @@ TEST_CASE("Test connected") {
     conn_signal = test_signal.connect([](int v) {
       return v + 1;
     });
-    CHECK(conn_signal.connected());
+    const signals2::connection& const_connection = conn_signal;
+    CHECK(const_connection.connected());
   }
   CHECK(!conn_signal.connected());
 }
