@@ -10,7 +10,7 @@
  *   Observable<T>  read-only interface; use as a parameter type
  *   State<T, Equal>    writable source of truth
  *   Computed<T, Equal> read-only derived value, dependencies discovered automatically
- *   FireNow        whether Subscribe() invokes the callback once immediately
+ *   FireNow        whether Subscribe() invokes the callback immediately
  *
  * Example:
  *   struct Model {
@@ -35,17 +35,21 @@
  * Threading: not thread-safe, like signals2 itself. Use from a single thread
  * (in practice, the UI thread).
  *
+ * Notification: Observable is current state, not an event stream. Reentrant
+ * changes are serialized per Observable, obsolete intermediate notifications
+ * are skipped, and the latest stable value is delivered before the outermost
+ * update returns. Use signal2 directly when every transient event matters.
+ *
  * Cycles: a Computed whose own output feeds back into one of its dependencies
- * is a usage error. Feedback that settles is fine -- Set() and Recompute()
- * both stop once the value stops changing, so a self-correcting subscriber
- * (clamping, normalising) converges and is supported. Feedback that does not
- * settle recurses until the stack is exhausted; that includes a plain cycle
- * such as `x = seed + y; y = x`, which diverges as soon as it is bound. This
- * class does not detect that case, and deliberately does not paper over it by
- * dropping updates: dropping them yields a silently wrong value, which is far
- * harder to find than a crash at the point of the mistake.
+ * is a usage error. Feedback that settles is supported. An unbounded cycle may
+ * exhaust the stack or loop; this class deliberately does not impose a
+ * recovery policy.
  *
  * Known limitations:
+ *
+ * - Mutate provides only the basic exception guarantee. If the mutator changes
+ *   the value and then throws, no notification is emitted. Mutators should not
+ *   throw after modifying the value.
  *
  * - No two-way binding. There is deliberately no "set without notifying", so
  *   writing back from an edit control inside its own change handler echoes to
@@ -60,11 +64,12 @@
  *   the calling module. Keep a Computed and its compute function in one module.
  */
 
-#ifndef STATE_H_
-#define STATE_H_
+#ifndef SIGNALS2_STATE_H_
+#define SIGNALS2_STATE_H_
 
 #include <algorithm>
 #include <concepts>
+#include <cstdint>
 #include <functional>
 #include <type_traits>
 #include <utility>
@@ -74,7 +79,7 @@
 
 namespace signals2 {
 
-/// Whether Subscribe() invokes the callback once with the current value.
+/// Whether Subscribe() invokes the callback immediately with the current value.
 enum class FireNow { No, Yes };
 
 namespace detail {
@@ -154,7 +159,8 @@ public:
 
   /**
    * @brief Subscribe a callable taking either (const T&) or no arguments.
-   * @param fire  FireNow::Yes invokes @p fn once with the current value first.
+   * @param fire  FireNow::Yes invokes @p fn with the current value before connecting;
+   *               repeats if the callback changes this Observable.
    * @return connection; the caller must keep it alive for the subscription to
    *         stay alive. Marked [[nodiscard]] -- dropping it is always a bug.
    *
@@ -173,14 +179,23 @@ public:
 
     Callback callback;
     if constexpr (std::invocable<F, const T&>) {
-      callback = [f = std::forward<F>(fn)](const T& value) { f(value); };
+      callback = [f = std::forward<F>(fn)](const T& value) mutable { f(value); };
     } else {
-      callback = [f = std::forward<F>(fn)](const T&) { f(); };
+      callback = [f = std::forward<F>(fn)](const T&) mutable { f(); };
     }
 
     if (fire == FireNow::Yes) {
-      callback(value_);
+      // A FireNow callback may itself change this Observable. Keep invoking the
+      // same callable until it has seen the latest stable revision, then move
+      // that callable into the signal. The class is single-threaded, so no
+      // update can race with the final invocation and connect below.
+      std::uint64_t observed_revision;
+      do {
+        observed_revision = revision_;
+        callback(value_);
+      } while (observed_revision != revision_);
     }
+
     return sig_.connect(std::move(callback));
   }
 
@@ -211,10 +226,41 @@ protected:
   explicit Observable(T init) : value_(std::move(init)) {}
   ~Observable() = default;
 
-  void Emit() { sig_(value_); }
+  void Emit() {
+    ++revision_;
+
+    if (emitting_) {
+      pending_emit_ = true;
+      return;
+    }
+
+    emitting_ = true;
+    try {
+      do {
+        pending_emit_ = false;
+        const std::uint64_t emitted_revision = revision_;
+
+        auto it = sig_.cbegin();
+        while (emitted_revision == revision_ && it != sig_.cend()) {
+          if (*it) {
+            (*it)(value_);
+          }
+          ++it;
+        }
+      } while (pending_emit_);
+    } catch (...) {
+      pending_emit_ = false;
+      emitting_ = false;
+      throw;
+    }
+    emitting_ = false;
+  }
 
   T value_{};
   mutable signals2::signal2<void(const T&)> sig_;
+  std::uint64_t revision_ = 0;
+  bool emitting_ = false;
+  bool pending_emit_ = false;
 };
 
 /**
@@ -331,15 +377,15 @@ public:
    * safe -- without it, this frame would unwind and overwrite the nested
    * (newer) result with a value computed from inputs that no longer hold.
    *
-   * Nothing here bounds the recursion. Feedback that converges terminates on
-   * the equality check; feedback that does not converge exhausts the stack.
-   * See "Cycles" in the file header -- that is a usage error, not a case this
-   * class recovers from.
+   * Nothing here bounds recursion. Feedback that converges terminates on the
+   * equality check. See "Cycles" in the file header -- divergent feedback is
+   * a usage error, not a case this class recovers from.
    */
   void Recompute() {
     if (!calc_) {
       return;
     }
+
     // Claim an epoch for this pass. Any nested Recompute() claims a later one.
     const unsigned long long started = ++epoch_;
 
@@ -352,9 +398,8 @@ public:
     }();
 
     if (epoch_ != started) {
-      // A nested pass ran to completion underneath us. Our inputs are stale;
-      // committing `next` now would be a lost update. Drop it silently -- the
-      // nested pass already stored the value and notified.
+      // A nested pass evaluated fresher inputs underneath us. Our inputs are
+      // stale; committing `next` now would be a lost update. Drop it silently.
       return;
     }
 
@@ -397,4 +442,4 @@ private:
 
 }  // namespace signals2
 
-#endif  // STATE_H_
+#endif  // SIGNALS2_STATE_H_

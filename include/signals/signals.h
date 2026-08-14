@@ -1,6 +1,7 @@
-#ifndef SIGNALS_H_
-#define SIGNALS_H_
+#ifndef SIGNALS2_SIGNALS_H_
+#define SIGNALS2_SIGNALS_H_
 
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <functional>
@@ -664,4 +665,4 @@ namespace std {
   struct is_placeholder<signals2::placeholder<N>> : std::integral_constant<int, N> { };
 }
 
-#endif // SIGNALS_H_
+#endif // SIGNALS2_SIGNALS_H_

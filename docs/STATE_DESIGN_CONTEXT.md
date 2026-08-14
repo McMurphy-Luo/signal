@@ -12,13 +12,13 @@
 | 文件 | 说明 |
 |---|---|
 | `include/signals/state.h` | 实现，header-only，依赖 `signals.h`（signals2） |
-| `test/state_test.cpp` | 19 组 Catch 行为测试，见 §7 |
+| `test/state_test.cpp` | 26 组 Catch 行为测试，见 §7 |
 | 本文档 | 设计上下文 |
 
 命名空间为 `signals2`，与 `signals.h` 同一个（早期迁移中曾用 `states`，已废弃）。
 
 验证状态：MSVC C++20，`state.h` / `state_test.cpp` 零警告，`signals2_tests` 全过
-（含 signals 侧共 35 组）。
+（含 signals 侧共 42 组）。
 
 注意"零警告"只覆盖本文档的两个交付物。整个测试树目前还有 2 条 C4834，都在
 `signals_test.cpp`（[55](../test/signals_test.cpp:55)、[385](../test/signals_test.cpp:385) 行）——
@@ -219,19 +219,57 @@ if (epoch_ != started) return;   // 嵌套重算跑完了，我这份作废
 两个细节：
 
 - **检查必须在赋值和 `Emit()` 之前**。放后面就等于没放。
-- **嵌套层级任意深都对**：每层跟自己的 `started` 比，只有最内层（读到最新输入的那趟）能提交。
-  中间层逐层作废，也**不会发出中间态通知** —— 外层在 `Emit()` 之前就退出了。
+- **嵌套层级任意深时 epoch 规则仍成立**：每层跟自己的 `started` 比，只有读到最新输入、未被后续
+  重算取代的那趟能提交。这些已经作废的计算帧不会发通知；这不等于整个依赖图无中间态，见 §5.3。
 
-**代价：不再有任何东西限制递归深度。**收敛的反馈靠相等性门禁自然终止（钳位、规范化这类都能收敛，
-测试 15 守着）；不收敛的反馈会耗尽栈。真环 `x = seed + y, y = x` 现在**在 `y.Bind()` 里就爆栈**，
-连 `Set` 都到不了。
+收敛的反馈靠相等性门禁自然终止（钳位、规范化这类都能收敛，测试 15 守着）；不收敛的反馈仍是
+使用错误。当前不限制递归深度或通知轮数，也不规定恢复策略，见 §5.5。
 
 这是**刻意选的**：静默错值比崩溃难查一个数量级，而且症状是间歇性的 —— 下一次任何无关变动都可能
 把它顺手修好（实测），于是表现为"UI 偶尔不刷新"。文档 §1 第 5 条描述旧 `phone::State` 手写依赖
 列表的 bug 时，原话正是这句。自动依赖收集干掉了那个成因，`recomputing_` 又从另一条路把它复现了。
 
-见 §5.5。**如果将来要加防崩护栏**，正确形态是纯粹的递归深度计数（超过 N 层就报告），
-它只管活性、不碰正确性 —— 不要把它和 epoch 混成一个机制，也不要退回丢弃更新。
+见 §5.5。epoch 只负责结果正确性；如果以后增加发散诊断，也必须作为独立机制，不能靠丢更新断环。
+
+### 2.7.1 通知重入：per-Observable revision + pending
+
+`State` / `Computed` 表示的是**当前值**，不是事件流。因此通知采用 latest-value 语义：减少已经被覆盖的
+中间值，但保证收敛后最后一次变化能送到订阅者。若业务要求每个瞬时事件都不能丢，应直接使用
+`signal2`。
+
+每个 `Observable` 保存 `revision_`、`emitting_` 和 `pending_emit_`。每次 `Set` / `Mutate` / `Notify`
+导致发射时先递增 revision；若同一个对象正在通知，只标记 pending，不递归调用自己的 signal。`Emit()`
+通过 signal 的 iterator 逐个调用原始 callback，并在调用下一个 callback 前检查当前轮的 revision 是否仍然
+有效。revision 一旦改变就结束旧轮，随后只为最新 revision 再跑一轮。
+
+例子（A 先连接，B 后连接）：
+
+```text
+state.Set(1)
+  A(1)
+    state.Set(2)   -> value 立即变为 2，只标记 pending
+    state.Set(3)   -> 2 被 3 覆盖
+  B(旧 revision)  -> 跳过
+  A(3)
+  B(3)
+state.Set(1) 返回
+```
+
+在 callback、计算函数和 mutator 都正常返回、传播最终收敛的前提下，契约是：
+
+- callback 真正执行时，参数与当时的 `Get()` 一致；
+- 同一对象已经过期的中间 revision 不继续发送给后续订阅者；
+- 参与本次传播且仍连接的订阅者一定收到最终稳定 revision；
+- 最外层更新返回前，同步触发的 pending 通知已经清空；
+- 可达的 bound `Computed` 最终值与其当前依赖重新计算结果处于同一个 Equal 等价类。
+
+不保证每个订阅者看到相同的中间序列；连接顺序仍决定谁在值被覆盖前已经看过它。跨多个 Observable 的
+菱形传播也仍可能产生 glitch（§5.3）。若任一用户 callback 抛异常，通知立即中止并向外重抛，上述
+“最终通知送达”保证不适用。
+
+`FireNow::Yes` 在正式连接前用同一个 callback 反复追赶 revision，直到立即回调没有再改变 Observable，
+然后把该 callback move 进 signal。库是单线程的，因此稳定调用与 connect 之间没有并发更新窗口；这种
+顺序既不会漏掉最终值，也不会复制出两份可变 callable 状态。
 
 ### 2.8 `State::Get()` 返 `const T&`，不做 `operator T()`
 
@@ -340,13 +378,15 @@ zUI 的 `Bind` 解决三个问题，逐条核对后**三个在这里都不成立
 2. **`deps_` 只增不减**（§2.3）。破坏 → 在 signal 发射期间销毁正在执行的 slot，UB。
 2b. **epoch 检查在赋值和 `Emit()` 之前**（§2.7）。破坏 → 外层用作废的输入覆盖嵌套重算的新结果。
    不要"顺手"加回一个重入门禁把嵌套重算挡掉 —— 那是被推翻的旧方案，四种重入情形全给错值。
+2c. **`Emit()` 逐个调用 slot，并在调用下一个 slot 前检查当前轮 revision 仍然有效**（§2.7.1）。
+   revision 变化时必须结束旧轮，`pending_emit_` 必须随后 flush；破坏任一条都会漏掉最终值或继续发送
+   过期值。
 3. **`State` / `Computed` 不可拷贝不可移动**（§2.9）。破坏 → tracker 里的地址身份失效。
 4. **`Observable` 的析构是 protected 非虚，派生类 `final`**。不要加虚函数（`ITracker` 的三个虚函数
    只在 `Computed` 上，且是 private 继承）。
 5. **`sig_` 是 `mutable`**，因为 `Get()` 是 const 但要 `connect`。
-6. **include 顺序：`<algorithm>` 在 `"signals.h"` 之前。**
-   `signals.h` 在 `signal_detail::remove()` 里用了 `std::find` 但**没有** include `<algorithm>` ——
-   目前靠外部先引入才能在 MSVC 之外的标准库上编过。顺手修 `signals.h` 更好，但在修之前别动这个顺序。
+6. **两个公开头文件都必须自包含。**`signals.h` 和 `state.h` 各自使用 `std::find`，因此各自显式包含
+   `<algorithm>`；不要重新引入依赖包含顺序才能编译的隐式前提。
 
 ---
 
@@ -378,7 +418,8 @@ zUI 的 `Bind` 解决三个问题，逐条核对后**三个在这里都不成立
 ### 5.3 无 glitch 消除 / 无批量提交
 
 菱形依赖（一个 computed 依赖两个 dep，同一逻辑操作里两个都变）会重算两次，中间那次订阅者看到
-不一致的中间态。
+不一致的中间态。§2.7.1 的 revision 只消除**同一个 Observable 发射期间**已经作废的通知，不会把
+跨对象的整张依赖图变成事务。
 
 这是 §2.1 里 data/view 双通道**想**解决的问题（先让 computed 重算完，再刷 view），但两级硬编码
 优先级解决不了链式/菱形依赖，所以没有保留。
@@ -390,26 +431,23 @@ zUI 的 `Bind` 解决三个问题，逐条核对后**三个在这里都不成立
 
 与 signals2 本身一致。单线程使用（实践中即 UI 线程）。
 
-### 5.5 发散的反馈会爆栈，没有护栏
+### 5.5 发散反馈是使用错误，当前不设护栏
 
-见 §2.7。**收敛的反馈是支持的**：`Set` 和 `Recompute` 都有相等性门禁，值不再变化就终止。
-订阅者里做钳位、规范化这类一次性修正，会正常收敛（测试 15）。
+见 §2.7。**收敛的反馈是支持的**：值不再变化就会被相等性门禁吸收，per-Observable pending 也会在
+最终 revision 发完后清空。订阅者里做钳位、规范化这类修正会正常收敛（测试 15、17、22）。
 
-**不收敛的反馈会耗尽栈**，包括最朴素的环：
+不收敛的反馈没有一致解，例如：
 
 ```cpp
 x.Bind([&]{ return seed.Get() + y.Get(); });
-y.Bind([&]{ return x.Get(); });          // ← 这一行就爆栈，Set 都到不了
+y.Bind([&]{ return x.Get(); });
 ```
 
-`x = seed + x` 无解，每绕一圈加一个 `seed`，永不收敛。
+当前实现不检查递归深度，也不限制同一个 Observable 的 pending 通知轮数。发散传播可能耗尽栈，
+也可能一直停留在 pending 循环中。库不静默截断传播，因为停在任意旧值会制造更难发现的不一致。
 
-**这是使用错误，不是库要兜住的场景**，理由见 §2.7 末尾：静默错值比崩溃难查得多。
-
-**如果将来要加护栏**：纯递归深度计数，超过 N 层调一个可安装的 handler（测试里换成探针，
-debug 下默认 assert）。注意它**只管活性，不碰正确性** —— epoch 已经把正确性拿满了，
-所以 N 取多少都不影响结果对不对，不需要论证这个数字"是不是真的环检测"。
-不要用异常，`signal_impl::operator()` 的异常安全性没人验证过。
+如果以后加入 Debug assert，应把它作为独立的诊断机制：只报告“很可能发散”，不丢更新、不参与结果
+选择，也不把某个固定阈值描述成真正的环检测。
 
 ---
 
@@ -443,7 +481,7 @@ debug 下默认 assert）。注意它**只管活性，不碰正确性** —— e
 
 ## 7. 测试矩阵
 
-`test/state_test.cpp`，19 组 Catch `TEST_CASE`，链进 `signals2_tests`。带 ★ 的是守护 §4 不变量的，
+`test/state_test.cpp`，26 组 Catch `TEST_CASE`，链进 `signals2_tests`。带 ★ 的是守护 §4 不变量的，
 重构后必须仍然通过。表里的编号对应源文件里的 `// ---- N. ----` 注释（Catch 用例名是描述性的，
 不带编号）。
 
@@ -468,6 +506,13 @@ debug 下默认 assert）。注意它**只管活性，不碰正确性** —— e
 | 14 ★ | **State 先死、Computed 后死** | 生命周期方向二；signals2 的 `weak_ptr<signal_detail>` 兜底 |
 | 15 ★ | 订阅者回写依赖 → 嵌套重算落地 | §2.7 epoch；旧方案这里停在 4（应 208）|
 | 16 ★ | 作废的计算结果不许提交 | §2.7 epoch；旧方案这里停在 2（应 12）|
+| 17 ★ | State 回调连续写入时合并中间值 | §2.7.1 revision + pending；后订阅者只见最终值 |
+| 18 ★ | Computed 通知中修改另一依赖 | 过期 revision 跳过，所有订阅者收到最终值 |
+| 19 | 重入 `Notify()` | 同值的新 revision 也按 pending 串行发送 |
+| 20 | 重入 `Mutate()` | 容器中间态被最终值覆盖 |
+| 21 ★ | `FireNow` 回调立即写 State | 连接前追赶到稳定 revision，不能漏掉最终变化 |
+| 21b | `FireNow` 使用有状态 mutable callable | 立即调用和后续通知共享 callable 状态 |
+| 22 ★ | 回调参数始终等于调用时的 `Get()` | revision 检查发生在用户 callback 之前 |
 
 **测试 14 的覆盖力比看上去弱，别当保险：**它只覆盖了**读缓存值**这条路径。那个 compute 函数捕获的
 `&tmp` 在块结束后已经悬空，
@@ -484,13 +529,13 @@ debug 下默认 assert）。注意它**只管活性，不碰正确性** —— e
 1. ~~**命名空间叫 `states`**~~ —— 已定为 `signals2`，与 `signals.h` 同一个。
 2. ~~**`state_test.cpp` 还是裸 main + 手写 check**~~ —— 已转成 Catch `TEST_CASE` 并接入
    `signals2_tests`（本仓库用的是 Catch2 v3.15.3 amalgamated，不是原计划的 gtest）。
-3. **`signals.h` 缺 `#include <algorithm>`**（§4.6）—— 独立 bug，建议顺手修掉，修完 §4.6 的
-   include 顺序约束就可以放松。
-   （注意缺的是 **`signals.h`**：它在 `signal_detail::remove()` 里用 `std::find`。`state.h` 自己
-   include 了 `<algorithm>`，恰恰是那个挡箭牌。）
+3. ~~**`signals.h` 缺 `#include <algorithm>`**~~ —— 已补齐，`signals.h` / `state.h` 现在都显式
+   包含自己使用的标准库设施，不再依赖包含顺序。
 4. **原 `zPhoneUI` 的 26+2 个调用点还没迁**（§6），以及原 `State.h`/`State.inl` 的删除。
 5. **§5.1 双向绑定**和**§5.3 批量提交**是两个已知的功能缺口，都有明确的"正确方向"记录在案，
    等真实需求出现再做。
 6. **战略问题（未解决）**：win-client 里 `zui::State`/`Bind`/`calc` 几乎无采用
    （只有 2 个 setting panel 引用，`zPhoneUI` 里 0 处 `#include <zUI/...>`）。如果 DuiLib 侧中期
    会迁到 zUI，那这个库会变成第三套要维护的响应式基础设施。这个判断需要看 zUI 的 roadmap。
+7. **发散诊断暂缓**：以后可考虑 Debug 下的递归深度 / pending 轮数 assert，但应独立设计，不能改变
+   latest-value 通知结果或用截断传播伪装成环处理。

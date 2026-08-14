@@ -395,3 +395,158 @@ TEST_CASE("A superseded compute pass does not commit its stale result") {
   CHECK(b.Get() == 11);
   CHECK(c.Get() == 12);
 }
+
+// ---- 17. reentrant State writes use latest-value notification semantics ----
+TEST_CASE("State reentrant writes are serialized to the latest value") {
+  State<int> state(0);
+  std::vector<int> first_seen;
+  std::vector<int> second_seen;
+  std::vector<signals2::connection> conns;
+
+  conns.push_back(state.Subscribe([&](int value) {
+    first_seen.push_back(value);
+    if (value == 1) {
+      state.Set(2);
+      state.Set(3);  // supersedes 2 before another notification round starts
+    }
+  }));
+  conns.push_back(
+      state.Subscribe([&](int value) { second_seen.push_back(value); }));
+
+  state.Set(1);
+
+  CHECK(state.Get() == 3);
+  CHECK(first_seen == std::vector<int>{1, 3});
+  CHECK(second_seen == std::vector<int>{3});
+}
+
+// ---- 18. a Computed's final revision reaches every subscriber ----
+TEST_CASE("Computed skips an obsolete revision and delivers its final value") {
+  State<int> left(1);
+  State<int> right(0);
+  Computed<int> sum;
+  sum.Bind([&] { return left.Get() + right.Get(); });
+
+  std::vector<int> first_seen;
+  std::vector<int> second_seen;
+  std::vector<signals2::connection> conns;
+  conns.push_back(sum.Subscribe([&](int value) {
+    first_seen.push_back(value);
+    if (value == 2) {
+      right.Set(10);  // reenters sum while sum is notifying value 2
+    }
+  }));
+  conns.push_back(sum.Subscribe([&](int value) { second_seen.push_back(value); }));
+
+  left.Set(2);
+
+  CHECK(sum.Get() == 12);
+  CHECK(first_seen == std::vector<int>{2, 12});
+  CHECK(second_seen == std::vector<int>{12});
+}
+
+// ---- 19. Notify follows the same revision rules as Set ----
+TEST_CASE("Reentrant Notify serializes another notification round") {
+  State<int> state(7);
+  int first_calls = 0;
+  int second_calls = 0;
+  bool notify_again = true;
+  std::vector<signals2::connection> conns;
+
+  conns.push_back(state.Subscribe([&](int value) {
+    CHECK(value == state.Get());
+    ++first_calls;
+    if (notify_again) {
+      notify_again = false;
+      state.Notify();
+    }
+  }));
+  conns.push_back(state.Subscribe([&](int value) {
+    CHECK(value == state.Get());
+    ++second_calls;
+  }));
+
+  state.Notify();
+
+  CHECK(first_calls == 2);
+  CHECK(second_calls == 1);
+}
+
+// ---- 20. Mutate also coalesces an obsolete in-flight value ----
+TEST_CASE("Reentrant Mutate delivers the final container value") {
+  State<std::vector<int>> state;
+  std::vector<std::size_t> first_sizes;
+  std::vector<std::size_t> second_sizes;
+  std::vector<signals2::connection> conns;
+
+  conns.push_back(state.Subscribe([&](const std::vector<int>& value) {
+    first_sizes.push_back(value.size());
+    if (value.size() == 1) {
+      state.Mutate([](auto& current) { current.push_back(2); });
+    }
+  }));
+  conns.push_back(state.Subscribe(
+      [&](const std::vector<int>& value) { second_sizes.push_back(value.size()); }));
+
+  state.Mutate([](auto& current) { current.push_back(1); });
+
+  CHECK(state.Get() == std::vector<int>{1, 2});
+  CHECK(first_sizes == std::vector<std::size_t>{1, 2});
+  CHECK(second_sizes == std::vector<std::size_t>{2});
+}
+
+// ---- 21. FireNow catches up before installing the callback ----
+TEST_CASE("FireNow does not miss a value written by its callback") {
+  State<int> state(1);
+  std::vector<int> seen;
+
+  auto connection = state.Subscribe(
+      [&](int value) {
+        seen.push_back(value);
+        if (value == 1) {
+          state.Set(2);
+        }
+      },
+      FireNow::Yes);
+
+  CHECK(connection.connected());
+  CHECK(state.Get() == 2);
+  CHECK(seen == std::vector<int>{1, 2});
+}
+
+// ---- 21b. FireNow and later notifications share callable state ----
+TEST_CASE("FireNow preserves a stateful callable across later notifications") {
+  State<int> state(1);
+  std::vector<int> call_numbers;
+
+  auto connection = state.Subscribe(
+      [count = 0, &call_numbers](int) mutable {
+        call_numbers.push_back(++count);
+      },
+      FireNow::Yes);
+
+  state.Set(2);
+
+  CHECK(connection.connected());
+  CHECK(call_numbers == std::vector<int>{1, 2});
+}
+
+// ---- 22. callback arguments never describe an obsolete value ----
+TEST_CASE("A callback argument equals Get at invocation time") {
+  State<int> state(0);
+  std::vector<signals2::connection> conns;
+  int calls = 0;
+
+  conns.push_back(state.Subscribe([&](int value) {
+    CHECK(value == state.Get());
+    ++calls;
+    if (value < 5) {
+      state.Set(value + 1);
+    }
+  }));
+
+  state.Set(1);
+
+  CHECK(state.Get() == 5);
+  CHECK(calls == 5);
+}
