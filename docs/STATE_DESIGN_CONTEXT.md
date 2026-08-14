@@ -1,4 +1,4 @@
-# `signals2::State` / `Computed` — 设计上下文与交接说明
+# `signals2::state` / `computed` — 设计上下文与交接说明
 
 > 这份文档记录的是**代码里看不出来的东西**：为什么是这个形状、哪些"更自然"的写法是陷阱、
 > 哪些方案被明确否决过。代码本身能回答"是什么"，这里回答"为什么"和"别改成什么"。
@@ -67,7 +67,7 @@
   vector 调 function 贵一个数量级。
 
 **结论：`zui::State` 是框架组件，不是库。** 但它的三个核心想法（自动依赖收集、只读句柄、原地
-Mutate）都不需要那个注册表，可以在 signals2 之上本地化 —— 这就是本实现做的事。
+mutate）都不需要那个注册表，可以在 signals2 之上本地化 —— 这就是本实现做的事。
 
 ---
 
@@ -86,8 +86,8 @@ Mutate）都不需要那个注册表，可以在 signals2 之上本地化 ——
 同源代码对"为什么要分两个通道"给出了互相矛盾的答案 → 这个划分没有承载真实语义。
 
 它实际上把三件正交的事塞进了一个维度：通知优先级、connect 时是否立即触发、set 时选择性跳过部分
-订阅者。前两个应该是参数（现在 `FireNow` 就是），第三个（`SetWithoutUpdateView`）最糟 ——
-让**写入方**决定哪些订阅者被通知，直接破坏 observer 契约。
+订阅者。当前 `connect()` 只建立连接，不立即调用；初始同步由调用方显式 `get()`。第三个
+（`SetWithoutUpdateView`）最糟 —— 让**写入方**决定哪些订阅者被通知，直接破坏 observer 契约。
 
 **证据：** `phone::State` 的 data 通道全仓只有 2 个外部调用点，其中一个
 （`phone_foreground_dashpad_panel.cpp:1108`）用 data 通道去刷一个 label —— 恰好是 view 通道的职责，
@@ -95,20 +95,20 @@ Mutate）都不需要那个注册表，可以在 signals2 之上本地化 ——
 
 ### 2.2 依赖自动收集，用 thread_local 栈而非全局注册表
 
-`Observable::Get()` 里埋钩子；`Computed::Recompute()` 试跑 `calc_()` 时压栈，被读到的 State 自己上报。
+`observable::get()` 里埋钩子；`computed::recompute()` 试跑 `calc_()` 时压栈，被读到的 state 自己上报。
 
 三个必须保持的细节：
 
-- **是栈不是单槽位。** 嵌套 Computed（A 的计算里读 B，B 也是 Computed）要能正确归属。
+- **是栈不是单槽位。** 嵌套 computed（A 的计算里读 B，B 也是 computed）要能正确归属。
   zUI 的 `RegGuard` 用单个全局 `g_reg_fun`，析构时直接置 `nullptr` 而不是恢复前值 →
   **嵌套 `calc()` 静默丢失依赖追踪**。不要抄那个形状。
 - **`thread_local`。** zUI 的 `g_reg_fun` 是普通全局变量。
-- **依赖归 `Computed` 自己所有**（`deps_` 成员），不是全局 map、也不是被观察者身上。
+- **依赖归 `computed` 自己所有**（`deps_` 成员），不是全局 map、也不是被观察者身上。
   这同时修掉了 §1 的第 1 条。
 
 ### 2.3 依赖集合只增不减 ← 最反直觉的一条，不要"优化"掉
 
-最初的写法是每次 `Recompute` 清空并重建 `deps_`，这样条件分支切换后旧依赖能丢掉。**这是错的。**
+最初的写法是每次 `recompute` 清空并重建 `deps_`，这样条件分支切换后旧依赖能丢掉。**这是错的。**
 
 `OnDependencyChanged()` 是从依赖 signal 的发射循环里调进来的。此时 `deps_.clear()` 会走到
 `signals.h` 里 `signal_slot_connection::disconnect()` 的第一行：
@@ -125,48 +125,52 @@ void disconnect() {
 重新赋值"这个 UB。
 
 改为只增不减后：分支切换时旧订阅保留，代价是偶尔一次多余重算（被 §2.5 的相等性判断吸收），
-换来的是**绝不在发射过程中销毁 slot**。集合规模由 compute 函数能触达的 State 总数封顶，不会无界增长。
-`tracked_` 负责去重（同一 State 被读多次只订阅一次）。
+换来的是**绝不在发射过程中销毁 slot**。集合规模由 compute 函数能触达的 state 总数封顶，不会无界增长。
+`tracked_` 负责去重（同一 state 被读多次只订阅一次）。
 
 行为正确性由测试 7 守着。
 
-### 2.4 `TrackScope` 必须在赋值和通知之前退出
+### 2.4 `tracking_scope` 必须在赋值和通知之前退出
 
 ```cpp
 T next = [this] {
-  detail::TrackScope scope(this);
+  detail::tracking_scope scope(this);
   return static_cast<T>(calc_());
 }();                                  // ← 追踪域到此结束
-// 之后才比较、赋值、Emit
+// 之后才比较、赋值、emit
 ```
 
-否则**订阅者回调里的 `Get()` 会被误记成本 computed 的依赖**。用 IIFE 而不是普通块作用域，是为了
+否则**订阅者回调里的 `get()` 会被误记成本 computed 的依赖**。用 IIFE 而不是普通块作用域，是为了
 同时支持不可默认构造的 `T`（避免 `T next{}; { ... next = calc_(); }` 那种双初始化）。
 
 zUI 的 `calc()` 没有这层隔离 —— 试跑完直接赋值。
 
 ### 2.5 相等性是对象级 BinaryPred 策略
 
-`State<T, Equal>` 和 `Computed<T, Equal>` 把等价判断作为模板策略保存，默认是
+`state<T, Equal>` 和 `computed<T, Equal>` 把等价判断作为模板策略保存，默认是
 `std::equal_to<>`，并要求它满足 `std::predicate<Equal&, const T&, const T&>`。比较策略在对象整个
 生命周期内保持一致，这一点更像 `std::map` 的 `Compare`，而不是每次调用都传 predicate 的
 `std::unique`。
 
 默认策略要求 `T` 支持 `operator==`。没有自然相等语义或不能修改的第三方类型必须显式提供比较器
 （测试 9）；有状态比较器同样受支持（测试 9b）。空比较器用 `[[no_unique_address]]` 保存，通常不增加
-对象大小。`Observable<T>` 不携带 Equal，因此使用不同比较策略的 State / Computed 仍能统一转换成
-`const Observable<T>&`。
+对象大小。`observable<T>` 不携带 Equal，因此使用不同比较策略的 state / computed 仍能统一转换成
+`const observable<T>&`。
+
+没有相等性或希望每次都通知时，可以显式使用 `always_notify`。它对任意两个值都返回 `false`，因此
+`state<T, always_notify>` 的每次 `set()`、以及 `computed<T, always_notify>` 的每次依赖重算都会提交并
+通知。对 computed 使用时要格外谨慎，因为相等性不再能吸收反馈或重复重算（测试 21、21b）。
 
 Equal 返回 `true` 表示两个值属于同一个等价类：新值会被丢弃，既不保存也不通知。这不是
-"保存但静默"；后者会让依赖它的 Computed 与 State 当前值失去同步。比较器应当稳定、无副作用，并尽量
+"保存但静默"；后者会让依赖它的 computed 与 state 当前值失去同步。比较器应当稳定、无副作用，并尽量
 满足等价关系。
 
-### 2.6 `Computed::Bind()` 延迟绑定，不在构造函数里计算
+### 2.6 `computed::bind()` 延迟绑定，不在构造函数里计算
 
 如果构造即计算，**成员声明顺序会变成隐式契约** —— 派生成员必须声明在所有依赖之后，否则读到
 尚未构造的成员。model struct 里几十个成员，这个约束迟早被违反且难查。
 
-延迟绑定（在 `DoInit()` 里 `Bind(...)`）让顺序无关，也让从 `SetComputed(fn, deps...)` 的迁移变成
+延迟绑定（在 `DoInit()` 里 `bind(...)`）让顺序无关，也让从 `SetComputed(fn, deps...)` 的迁移变成
 机械替换（删掉依赖列表即可）。
 
 zUI 的 `State(const std::function<T()>&)` 是构造即计算，它靠 `calc()` 那层外部封装绕开。我们没那个包袱。
@@ -176,7 +180,7 @@ zUI 的 `State(const std::function<T()>&)` 是构造即计算，它靠 `calc()` 
 > 这一节推翻了早前的 `recomputing_` 方案。旧方案的描述（"环形依赖用标志显式断开"、
 > "断环时保留上一个一致的结果"）**是错的**，下面记录为什么，以免有人把它改回去。
 
-**旧方案做了什么。**`Computed` 有个 `bool recomputing_`，覆盖 `Recompute()` 从进入到 `Emit()` 结束
+**旧方案做了什么。**`computed` 有个 `bool recomputing_`，覆盖 `recompute()` 从进入到 `emit()` 结束
 的整段。期间任何依赖变动触发的重算请求，撞上门禁直接 `return` —— **丢弃，不是延后**。
 
 **实测它在每一种重入情形下都给错值**（探针数据，非推理）：
@@ -184,20 +188,20 @@ zUI 的 `State(const std::function<T()>&)` 是构造即计算，它靠 `calc()` 
 | 情形 | 旧方案结果 | 一致值 |
 |---|---|---|
 | 订阅者回写依赖 | `4` | 208 |
-| 间接反馈（订阅者写另一个 State） | `3` | 32 |
+| 间接反馈（订阅者写另一个 state） | `3` | 32 |
 | calc 内先读后写同一依赖 | `2` | 12 |
 | 真环 `x = seed + y, y = x` | `x=3, y=3` | 无解 |
 
-真环那条尤其说明问题：**`Bind` 一结束就已经不一致**（`x=2, y=1`），根本不是"更新之后才偏"。
+真环那条尤其说明问题：**`bind` 一结束就已经不一致**（`x=2, y=1`），根本不是"更新之后才偏"。
 `x == seed + y` 和 `y == x` 哪个成立，纯看谁是传播链的最后一环。所谓"断环"是虚构的 ——
 标志只是把恰好落在发射期间的那次重算丢掉，剩下什么值全凭顺序。
 
 **根因不是"重入"，是"无条件提交"。**看栈：
 
 ```
-外层 Recompute
+外层 recompute
   ├ calc_() 读 a=1, b=1                     ← 输入快照
-  │    └ b.Set(11) → 内层 Recompute
+  │    └ b.set(11) → 内层 recompute
   │         └ 读 a=1, b=11 → value_ = 12    ← 更新的结果，已提交
   ├ calc_() 返回 1+1 = 2                    ← 用变更前的快照算出来的
   └ value_ = 2                              ← 无条件赋值，把 12 覆盖回去
@@ -205,11 +209,11 @@ zUI 的 `State(const std::function<T()>&)` 是构造即计算，它靠 `calc()` 
 
 外层坚持提交一份**输入已经作废**的结果。这是 lost update，跟重入本身无关。
 
-**现在的做法。**每趟 `Recompute()` 领一个 epoch，提交前检查自己有没有被取代：
+**现在的做法。**每趟 `recompute()` 领一个 epoch，提交前检查自己有没有被取代：
 
 ```cpp
 const unsigned long long started = ++epoch_;
-T next = [this]{ detail::TrackScope scope(this); return static_cast<T>(calc_()); }();
+T next = [this]{ detail::tracking_scope scope(this); return static_cast<T>(calc_()); }();
 if (epoch_ != started) return;   // 嵌套重算跑完了，我这份作废
 ```
 
@@ -218,7 +222,7 @@ if (epoch_ != started) return;   // 嵌套重算跑完了，我这份作废
 
 两个细节：
 
-- **检查必须在赋值和 `Emit()` 之前**。放后面就等于没放。
+- **检查必须在赋值和 `emit()` 之前**。放后面就等于没放。
 - **嵌套层级任意深时 epoch 规则仍成立**：每层跟自己的 `started` 比，只有读到最新输入、未被后续
   重算取代的那趟能提交。这些已经作废的计算帧不会发通知；这不等于整个依赖图无中间态，见 §5.3。
 
@@ -231,70 +235,70 @@ if (epoch_ != started) return;   // 嵌套重算跑完了，我这份作废
 
 见 §5.5。epoch 只负责结果正确性；如果以后增加发散诊断，也必须作为独立机制，不能靠丢更新断环。
 
-### 2.7.1 通知重入：per-Observable revision + pending
+### 2.7.1 通知重入：per-observable revision + pending
 
-`State` / `Computed` 表示的是**当前值**，不是事件流。因此通知采用 latest-value 语义：减少已经被覆盖的
+`state` / `computed` 表示的是**当前值**，不是事件流。因此通知采用 latest-value 语义：减少已经被覆盖的
 中间值，但保证收敛后最后一次变化能送到订阅者。若业务要求每个瞬时事件都不能丢，应直接使用
 `signal2`。
 
-每个 `Observable` 保存 `revision_`、`emitting_` 和 `pending_emit_`。每次 `Set` / `Mutate` / `Notify`
-导致发射时先递增 revision；若同一个对象正在通知，只标记 pending，不递归调用自己的 signal。`Emit()`
+每个 `observable` 保存 `revision_`、`emitting_` 和 `pending_emit_`。每次 `set` / `mutate` / `notify`
+导致发射时先递增 revision；若同一个对象正在通知，只标记 pending，不递归调用自己的 signal。`emit()`
 通过 signal 的 iterator 逐个调用原始 callback，并在调用下一个 callback 前检查当前轮的 revision 是否仍然
 有效。revision 一旦改变就结束旧轮，随后只为最新 revision 再跑一轮。
 
 例子（A 先连接，B 后连接）：
 
 ```text
-state.Set(1)
+state.set(1)
   A(1)
-    state.Set(2)   -> value 立即变为 2，只标记 pending
-    state.Set(3)   -> 2 被 3 覆盖
+    state.set(2)   -> value 立即变为 2，只标记 pending
+    state.set(3)   -> 2 被 3 覆盖
   B(旧 revision)  -> 跳过
   A(3)
   B(3)
-state.Set(1) 返回
+state.set(1) 返回
 ```
 
 在 callback、计算函数和 mutator 都正常返回、传播最终收敛的前提下，契约是：
 
-- callback 真正执行时，参数与当时的 `Get()` 一致；
+- callback 真正执行时，参数与当时的 `get()` 一致；
 - 同一对象已经过期的中间 revision 不继续发送给后续订阅者；
 - 参与本次传播且仍连接的订阅者一定收到最终稳定 revision；
 - 最外层更新返回前，同步触发的 pending 通知已经清空；
-- 可达的 bound `Computed` 最终值与其当前依赖重新计算结果处于同一个 Equal 等价类。
+- 可达的 bound `computed` 最终值与其当前依赖重新计算结果处于同一个 Equal 等价类。
 
-不保证每个订阅者看到相同的中间序列；连接顺序仍决定谁在值被覆盖前已经看过它。跨多个 Observable 的
+不保证每个订阅者看到相同的中间序列；连接顺序仍决定谁在值被覆盖前已经看过它。跨多个 observable 的
 菱形传播也仍可能产生 glitch（§5.3）。若任一用户 callback 抛异常，通知立即中止并向外重抛，上述
 “最终通知送达”保证不适用。
 
-`FireNow::Yes` 在正式连接前用同一个 callback 反复追赶 revision，直到立即回调没有再改变 Observable，
-然后把该 callback move 进 signal。库是单线程的，因此稳定调用与 connect 之间没有并发更新窗口；这种
-顺序既不会漏掉最终值，也不会复制出两份可变 callable 状态。
+`connect()` 只观察连接后的通知，不隐式调用新 callback。需要初始同步时，调用方显式读取当前值，
+例如先执行 `label.SetText(state.get())`，再保存 `state.connect(...)` 返回的 connection。库是单线程的，
+两步之间没有并发更新窗口。
 
-### 2.8 `State::Get()` 返 `const T&`，不做 `operator T()`
+### 2.8 `state::get()` 返 `const T&`，不做 `operator T()`
 
 `phone::State` 和 `zui::State` 都有非 explicit 的 `operator T()`。配合 `operator=(const T&)`
-容易写出意外的重载解析结果，而且每次转换都拷贝。只留 `Get()`。
+容易写出意外的重载解析结果，而且每次转换都拷贝。只留 `get()`。
 
 `zui::State::Get()` 返回 `T const`（按值，每读必拷贝）—— 那是它 `weak_ptr` 设计逼出来的必然结果
 （`lock()` 拿到的临时 shared_ptr 出函数就释放，返回引用不安全）。我们不做 weak 视图，所以可以返引用。
 见 §3.1。
 
-### 2.9 `State` / `Computed` 不可拷贝不可移动
+### 2.9 `state` / `computed` 不可拷贝不可移动
 
-`Observable` 删掉拷贝构造（连带删掉隐式移动）。**必须保持** —— `tracked_` 存的是 `const void*`
+`observable` 删掉拷贝构造（连带删掉隐式移动）。**必须保持** —— `tracked_` 存的是 `const void*`
 地址，slot 捕获的是 tracker 裸指针，对象地址是身份的一部分。
 
 `zui::State` 的拷贝构造是**共享 `_val`**（注释承认是为 `Loop` 的单项刷新特意做的）。
 "拷贝之后两个对象指向同一个值"是极度反直觉的语义，不要抄。
 
-### 2.10 `Notify()` 的存在理由
+### 2.10 `notify()` 的存在理由
 
-`Set` 有相等性门禁，所以当 `T` 是指针 / 句柄、**指向的对象内部变了但指针没变**时，`Set` 会被判定为
-无变化而静默跳过。`Notify()` 是这种场景的逃生口。原代码里 `model_.channel`、
-`model_.transfer_summary` 就是这类指针型 State。
+`set` 有相等性门禁，所以当 `T` 是指针 / 句柄、**指向的对象内部变了但指针没变**时，`set` 会被判定为
+无变化而静默跳过。`notify()` 是这种场景的逃生口。原代码里 `model_.channel`、
+`model_.transfer_summary` 就是这类指针型 state。
 
-（`phone::State::UpdateView()` 是零调用的投机 API，`Notify()` 不同 —— 它有具体场景。）
+（`phone::State::UpdateView()` 是零调用的投机 API，`notify()` 不同 —— 它有具体场景。）
 
 ---
 
@@ -306,37 +310,37 @@ zUI 的 `Bind` 解决三个问题，逐条核对后**三个在这里都不成立
 
 | Bind 的用途 | 在这里 |
 |---|---|
-| 生命周期安全（源头死了不崩） | `connection` 已覆盖回调悬空；**读**已死 State 的路径在现有所有权模型下不存在 |
+| 生命周期安全（源头死了不崩） | `connection` 已覆盖回调悬空；**读**已死 state 的路径在现有所有权模型下不存在 |
 | 常量/绑定统一参数（`Text("hi")` 与 `Text(state)` 都能编） | 这是**声明式组件构造**的需求。DuiLib 控件从 XML 创建后命令式绑定，没有这个构造参数 |
 | rebind（列表项复用时重指向另一个 State） | zUI view tree diff 的需求，当前无此模式 |
 
 **所有权分析**（否决的依据）：
 
-- model（一堆 State）和 DuiLib 控件**同属一个 panel**，同生共死。
+- model（一堆 state）和 DuiLib 控件**同属一个 panel**，同生共死。
 - 跨对象的例子（`btn_transfer_summary_->GetModel().visible` 被 panel 观察）方向是
-  **State 先死、observer 后死** → signals2 天然安全（connection 持 `weak_ptr<signal_detail>`）。
-- 跨模块的典型场景是"service 持 State，多个 panel 观察"，仍然是 State 活得更久。
-- 反方向（长命对象直接持有短命 State 并读它）本身是设计问题，该修那个设计。
+  **state 先死、observer 后死** → signals2 天然安全（connection 持 `weak_ptr<signal_detail>`）。
+- 跨模块的典型场景是"service 持 state，多个 panel 观察"，仍然是 state 活得更久。
+- 反方向（长命对象直接持有短命 state 并读它）本身是设计问题，该修那个设计。
 
-**成本**（如果做）：`State` 内部必须改成 `shared_ptr<T>` → 每个 State 多一次堆分配 + 一次间接寻址
+**成本**（如果做）：`state` 内部必须改成 `shared_ptr<T>` → 每个 state 多一次堆分配 + 一次间接寻址
 （一个 16 成员的 model 就是 16 次额外 `make_shared`）；`Ref::Get()` 必须按值返回 →
-`State<CString>` 每次读都拷贝；每个 `Ref` 额外存一份 `T fallback_`；最贵的是**概念负担**
+`state<CString>` 每次读都拷贝；每个 `Ref` 额外存一份 `T fallback_`；最贵的是**概念负担**
 （使用者每次要判断该用哪个句柄 —— data/view 双通道已经因为多余的选择被用错过一次了）。
 
 **现在不做没有沉没成本**：`T value_` → `shared_ptr<T> value_` 是纯内部布局改动，
-`Get` / `Set` / `Subscribe` / `Mutate` 签名一个都不变（header-only 模板，重编即可）。
+`get` / `set` / `connect` / `mutate` 签名一个都不变（header-only 模板，重编即可）。
 
 **三个触发条件，出现任一个再回来加**：
 1. 需要列表项复用 + rebind；
-2. 出现确有必要的"长命对象读短命 State"且不是设计错误；
+2. 出现确有必要的"长命对象读短命 state"且不是设计错误；
 3. 要做声明式组件 API（那基本等于在往 zUI 方向走，那时更该讨论直接用 zUI）。
 
-`Observable<T>` 顺手顶掉了 Bind 唯一成立的那个角色（只读句柄）：`const Observable<T>&` 作参数类型，
-`State` 和 `Computed` 都能传，零分配、返引用。
+`observable<T>` 顺手顶掉了 Bind 唯一成立的那个角色（只读句柄）：`const observable<T>&` 作参数类型，
+`state` 和 `computed` 都能传，零分配、返引用。
 
-两个 `Subscribe` 重载都是 **const**（`sig_` 是 `mutable`，见 §4.5）—— 这是上面那句成立的前提：
-只读句柄必须能"观察"，而不只是"读一次"。const 掉之后 `const Observable<T>&` 才是完整的观察者入口，
-否则拿到它的函数只能 `Get()`，还得把非 const 引用传下去，这个抽象就白给了。测试 12b 守着这条。
+两个 `connect` 重载都是 **const**（`sig_` 是 `mutable`，见 §4.5）—— 这是上面那句成立的前提：
+只读句柄必须能"观察"，而不只是"读一次"。const 掉之后 `const observable<T>&` 才是完整的观察者入口，
+否则拿到它的函数只能 `get()`，还得把非 const 引用传下去，这个抽象就白给了。测试 12b 守着这条。
 
 ### 3.2 `ScopedConnections` RAII 容器 —— 不做（连别名也不留）
 
@@ -358,7 +362,7 @@ zUI 的 `Bind` 解决三个问题，逐条核对后**三个在这里都不成立
 （附：**vector 扩容对 connection 是安全的** —— `connection` 只有一个 `unique_ptr` 指向堆上的
 `signal_slot_connection`，signal 侧注册的是指向堆上 `the_slot` 的裸指针，移动外层不影响堆对象地址。）
 
-### 3.3 `SetWithoutNotify` / 静默 Set —— 不做
+### 3.3 `SetWithoutNotify` / 静默 set —— 不做
 
 见 §5.1。
 
@@ -366,7 +370,7 @@ zUI 的 `Bind` 解决三个问题，逐条核对后**三个在这里都不成立
 
 `stateA + stateB` 构造惰性 `BinaryOpExpr`。只支持 `+ - * /`，无比较和逻辑运算，
 `ValueType` 用 `std::common_type_t` 混合类型时行为意外。有了自动依赖收集之后，
-`Bind([&]{ return a.Get() + b.Get(); })` 已经足够可读，不值得为省两个 `.Get()` 引入一层模板机制。
+`bind([&]{ return a.get() + b.get(); })` 已经足够可读，不值得为省两个 `.get()` 引入一层模板机制。
 
 ---
 
@@ -374,17 +378,17 @@ zUI 的 `Bind` 解决三个问题，逐条核对后**三个在这里都不成立
 
 改这份代码前先读这一节。
 
-1. **`TrackScope` 在 `Emit()` 之前退出**（§2.4）。破坏 → 订阅者的读被误记为依赖。
+1. **`tracking_scope` 在 `emit()` 之前退出**（§2.4）。破坏 → 订阅者的读被误记为依赖。
 2. **`deps_` 只增不减**（§2.3）。破坏 → 在 signal 发射期间销毁正在执行的 slot，UB。
-2b. **epoch 检查在赋值和 `Emit()` 之前**（§2.7）。破坏 → 外层用作废的输入覆盖嵌套重算的新结果。
+2b. **epoch 检查在赋值和 `emit()` 之前**（§2.7）。破坏 → 外层用作废的输入覆盖嵌套重算的新结果。
    不要"顺手"加回一个重入门禁把嵌套重算挡掉 —— 那是被推翻的旧方案，四种重入情形全给错值。
-2c. **`Emit()` 逐个调用 slot，并在调用下一个 slot 前检查当前轮 revision 仍然有效**（§2.7.1）。
+2c. **`emit()` 逐个调用 slot，并在调用下一个 slot 前检查当前轮 revision 仍然有效**（§2.7.1）。
    revision 变化时必须结束旧轮，`pending_emit_` 必须随后 flush；破坏任一条都会漏掉最终值或继续发送
    过期值。
-3. **`State` / `Computed` 不可拷贝不可移动**（§2.9）。破坏 → tracker 里的地址身份失效。
-4. **`Observable` 的析构是 protected 非虚，派生类 `final`**。不要加虚函数（`ITracker` 的三个虚函数
-   只在 `Computed` 上，且是 private 继承）。
-5. **`sig_` 是 `mutable`**，因为 `Get()` 是 const 但要 `connect`。
+3. **`state` / `computed` 不可拷贝不可移动**（§2.9）。破坏 → tracker 里的地址身份失效。
+4. **`observable` 的析构是 protected 非虚，派生类 `final`**。不要加虚函数（`dependency_tracker` 的三个虚函数
+   只在 `computed` 上，且是 private 继承）。
+5. **`sig_` 是 `mutable`**，因为 `get()` 是 const 但要 `connect`。
 6. **两个公开头文件都必须自包含。**`signals.h` 和 `state.h` 各自使用 `std::find`，因此各自显式包含
    `<algorithm>`；不要重新引入依赖包含顺序才能编译的隐式前提。
 
@@ -394,31 +398,31 @@ zUI 的 `Bind` 解决三个问题，逐条核对后**三个在这里都不成立
 
 ### 5.1 没有双向绑定
 
-刻意不提供"静默 Set"。编辑框在自己的 change handler 里回写模型会回声刷新、光标跳。
+刻意不提供"静默 set"。编辑框在自己的 change handler 里回写模型会回声刷新、光标跳。
 
-**为什么不给静默 Set**：它会让依赖该值的 `Computed` 失去同步，模型内部变得不一致 ——
+**为什么不给静默 set**：它会让依赖该值的 `computed` 失去同步，模型内部变得不一致 ——
 比回声问题更糟。（`phone::State::SetWithoutUpdateView` 至少还更新 computed，但它的做法是让写入方
 挑订阅者，破坏 observer 契约，见 §2.1。）
 
 **当前建议**：在调用点用一个局部 flag 挡住回声。
 
 **如果真需要**：正确方向是给 `connection` 加 scoped block / unblock（"这次通知跳过这条订阅"），
-但那要改 `signals.h`。不要用静默 Set 凑。
+但那要改 `signals.h`。不要用静默 set 凑。
 
 ### 5.2 依赖追踪不跨 DLL 边界（有条件）
 
 追踪栈是 per-module 的 `thread_local`。
 
-- **没问题**：compute 函数直接读另一个模块的 State —— 那个 `Get()` 在**调用方**模块实例化，
+- **没问题**：compute 函数直接读另一个模块的 state —— 那个 `get()` 在**调用方**模块实例化，
   用的是同一个栈。
-- **有问题**：`Get()` 发生在另一个模块**导出的非 inline 函数内部** → 该模块的栈是空的，追踪不到。
+- **有问题**：`get()` 发生在另一个模块**导出的非 inline 函数内部** → 该模块的栈是空的，追踪不到。
 
-约束：把一个 `Computed` 和它的 compute 函数放在同一个模块里。
+约束：把一个 `computed` 和它的 compute 函数放在同一个模块里。
 
 ### 5.3 无 glitch 消除 / 无批量提交
 
 菱形依赖（一个 computed 依赖两个 dep，同一逻辑操作里两个都变）会重算两次，中间那次订阅者看到
-不一致的中间态。§2.7.1 的 revision 只消除**同一个 Observable 发射期间**已经作废的通知，不会把
+不一致的中间态。§2.7.1 的 revision 只消除**同一个 observable 发射期间**已经作废的通知，不会把
 跨对象的整张依赖图变成事务。
 
 这是 §2.1 里 data/view 双通道**想**解决的问题（先让 computed 重算完，再刷 view），但两级硬编码
@@ -433,17 +437,17 @@ zUI 的 `Bind` 解决三个问题，逐条核对后**三个在这里都不成立
 
 ### 5.5 发散反馈是使用错误，当前不设护栏
 
-见 §2.7。**收敛的反馈是支持的**：值不再变化就会被相等性门禁吸收，per-Observable pending 也会在
+见 §2.7。**收敛的反馈是支持的**：值不再变化就会被相等性门禁吸收，per-observable pending 也会在
 最终 revision 发完后清空。订阅者里做钳位、规范化这类修正会正常收敛（测试 15、17、22）。
 
 不收敛的反馈没有一致解，例如：
 
 ```cpp
-x.Bind([&]{ return seed.Get() + y.Get(); });
-y.Bind([&]{ return x.Get(); });
+x.bind([&]{ return seed.get() + y.get(); });
+y.bind([&]{ return x.get(); });
 ```
 
-当前实现不检查递归深度，也不限制同一个 Observable 的 pending 通知轮数。发散传播可能耗尽栈，
+当前实现不检查递归深度，也不限制同一个 observable 的 pending 通知轮数。发散传播可能耗尽栈，
 也可能一直停留在 pending 循环中。库不静默截断传播，因为停在任意旧值会制造更难发现的不一致。
 
 如果以后加入 Debug assert，应把它作为独立的诊断机制：只报告“很可能发散”，不丢更新、不参与结果
@@ -455,16 +459,16 @@ y.Bind([&]{ return x.Get(); });
 
 | 旧 | 新 |
 |---|---|
-| `SetViewUpdateWithConnection(ctrl, &C::M)` | `Subscribe(ctrl, &C::M, FireNow::Yes)` |
-| `SetViewUpdateWithConnection(cb)` | `Subscribe(cb, FireNow::Yes)` |
-| `SetUpdateWithConnection(cb)` | `Subscribe(cb)` |
-| `SetUpdate(...)` / `SetViewUpdate(...)`（连接存错地方） | **删除**，改用 `Subscribe` 并由订阅方持有 connection |
-| `SetComputed(fn, &dep1, &dep2)` | `Bind(fn)` —— 依赖列表删掉 |
+| `SetViewUpdateWithConnection(ctrl, &C::M)` | 显式用 `get()` 初始化控件，再 `connect(ctrl, &C::M)` |
+| `SetViewUpdateWithConnection(cb)` | 显式用 `get()` 初始化，再 `connect(cb)` |
+| `SetUpdateWithConnection(cb)` | `connect(cb)` |
+| `SetUpdate(...)` / `SetViewUpdate(...)`（连接存错地方） | **删除**，改用 `connect` 并由订阅方持有 connection |
+| `SetComputed(fn, &dep1, &dep2)` | `bind(fn)` —— 依赖列表删掉 |
 | `SetWithoutUpdateView` / `UpdateView()` | **删除**（原本零调用） |
-| `Get()` / `Set()` / `operator=(const T&)` | 不变 |
-| `operator T()` 隐式转换 | **删除**，显式 `Get()` |
-| 5 个成员函数重载 | 1 个 `Subscribe(C*, M, FireNow)`，靠隐式转换覆盖 `void(const T&)` / `void(T)` / `void(LPCTSTR)` |
-| — | 新增 `Mutate`、`Peek`、`Notify`、`Recompute`、`IsBound` |
+| `Get()` / `Set()` / `operator=(const T&)` | `get()` / `set()`；赋值运算符不变 |
+| `operator T()` 隐式转换 | **删除**，显式 `get()` |
+| 5 个成员函数重载 | 1 个 `connect(C*, M)`，靠隐式转换覆盖 `void(const T&)` / `void(T)` / `void(LPCTSTR)` |
+| — | 新增 `mutate`、`peek`、`notify`、`recompute`、`bound` |
 
 **原调用点规模**（如需回去改）：`SetViewUpdate*` 约 26 处外部调用，`SetUpdate*` 2 处，
 分布在 5 个文件：`phone_foreground_summary_bubble_window.cpp`(12)、
@@ -473,9 +477,9 @@ y.Bind([&]{ return x.Get(); });
 （早前口头说过的 "57 处" 是含 `State.h`/`State.inl` 内部声明与定义的总匹配数，外部实际调用点是上述数字。）
 
 **迁移时要注意的一个既存 bug 形态**：原代码里 `SetComputed` 是在所有 view 绑定**之后**才调用的。
-因为 view 通道 connect 时会立即触发、而 `Set` 有相等性门禁，所以当 computed 算出来的值恰好等于
-`T()` 时，一次通知都不会发，控件会停在 XML 的初值上。用 `Bind()` + `Subscribe(..., FireNow::Yes)`
-的顺序（先 Bind 再 Subscribe）可以避免；迁移时逐个核对绑定顺序。
+因为 view 通道 connect 时会立即触发、而 `set` 有相等性门禁，所以当 computed 算出来的值恰好等于
+`T()` 时，一次通知都不会发，控件会停在 XML 的初值上。迁移时应先 `bind()`，再用 `get()` 显式初始化
+控件，最后 `connect()` 后续变化；逐个核对绑定和初始化顺序。
 
 ---
 
@@ -487,38 +491,38 @@ y.Bind([&]{ return x.Get(); });
 
 | # | 场景 | 守护什么 |
 |---|---|---|
-| 1 | Set / Subscribe / 相等性门禁 / `operator=` | 基本语义 |
-| 2 | `FireNow::Yes` 立即触发 | 初始同步 |
+| 1 | set / connect / 相等性门禁 / `operator=` | 基本语义 |
+| 2 | `connect()` 不立即触发 | 只观察连接后的通知；初始同步显式完成 |
 | 3 | `std::vector<connection>` 析构后不再回调 | connection RAII |
-| 4 | 成员函数重载 + 隐式转换 + 零参可调用对象 | 单个 `Subscribe` 重载覆盖多签名 |
-| 5 | Computed 自动依赖发现（2 个依赖） | §2.2 |
+| 4 | 成员函数重载 + 隐式转换 + 零参可调用对象 | 单个 `connect` 重载覆盖多签名 |
+| 5 | computed 自动依赖发现（2 个依赖） | §2.2 |
 | 6 | 链式 computed（A → B → C） | 嵌套追踪栈（§2.2） |
 | 7 ★ | 条件依赖分支切换 + 旧依赖变化无害 | §2.3 只增不减 |
-| 8 | 容器上的 `Mutate` | 原地修改 + 无条件通知 |
+| 8 | 容器上的 `mutate` | 原地修改 + 无条件通知 |
 | 9 | 无 operator== 的类型显式提供 BinaryPred | §2.5 严格默认策略 |
-| 9b | Computed 保存有状态 BinaryPred | §2.5 对象级比较策略 |
+| 9b | computed 保存有状态 BinaryPred | §2.5 对象级比较策略 |
 | 10 ★ | 收敛的反馈环停在不动点 | §2.7 相等性门禁即终止判据 |
-| 11 | `Peek` 不建立依赖 | 逃生口语义 |
-| 12 | `const Observable<T>&` 作参数（读） | §3.1 的替代方案 |
-| 12b | `const Observable<T>&` 上订阅 callable | `Subscribe() const` 重载之一，见 §3.1 末尾 |
-| 12c | `const Observable<T>&` 上订阅成员函数 | `Subscribe() const` 重载之二（测试 4 走非 const，盖不住） |
+| 11 | `peek` 不建立依赖 | 逃生口语义 |
+| 12 | `const observable<T>&` 作参数（读） | §3.1 的替代方案 |
+| 12b | `const observable<T>&` 上订阅 callable | `connect() const` 重载之一，见 §3.1 末尾 |
+| 12c | `const observable<T>&` 上订阅成员函数 | `connect() const` 重载之二（测试 4 走非 const，盖不住） |
 | 13 | observer 先死 | 生命周期方向一 |
-| 14 ★ | **State 先死、Computed 后死** | 生命周期方向二；signals2 的 `weak_ptr<signal_detail>` 兜底 |
+| 14 ★ | **state 先死、computed 后死** | 生命周期方向二；signals2 的 `weak_ptr<signal_detail>` 兜底 |
 | 15 ★ | 订阅者回写依赖 → 嵌套重算落地 | §2.7 epoch；旧方案这里停在 4（应 208）|
 | 16 ★ | 作废的计算结果不许提交 | §2.7 epoch；旧方案这里停在 2（应 12）|
-| 17 ★ | State 回调连续写入时合并中间值 | §2.7.1 revision + pending；后订阅者只见最终值 |
-| 18 ★ | Computed 通知中修改另一依赖 | 过期 revision 跳过，所有订阅者收到最终值 |
-| 19 | 重入 `Notify()` | 同值的新 revision 也按 pending 串行发送 |
-| 20 | 重入 `Mutate()` | 容器中间态被最终值覆盖 |
-| 21 ★ | `FireNow` 回调立即写 State | 连接前追赶到稳定 revision，不能漏掉最终变化 |
-| 21b | `FireNow` 使用有状态 mutable callable | 立即调用和后续通知共享 callable 状态 |
-| 22 ★ | 回调参数始终等于调用时的 `Get()` | revision 检查发生在用户 callback 之前 |
+| 17 ★ | state 回调连续写入时合并中间值 | §2.7.1 revision + pending；后订阅者只见最终值 |
+| 18 ★ | computed 通知中修改另一依赖 | 过期 revision 跳过，所有订阅者收到最终值 |
+| 19 | 重入 `notify()` | 同值的新 revision 也按 pending 串行发送 |
+| 20 | 重入 `mutate()` | 容器中间态被最终值覆盖 |
+| 21 | `always_notify` 用于无相等性的 state | 每次 set 都提交并通知 |
+| 21b | `always_notify` 用于 computed | 等价结果也提交并通知 |
+| 22 ★ | 回调参数始终等于调用时的 `get()` | revision 检查发生在用户 callback 之前 |
 
 **测试 14 的覆盖力比看上去弱，别当保险：**它只覆盖了**读缓存值**这条路径。那个 compute 函数捕获的
 `&tmp` 在块结束后已经悬空，
   测试之后从没再执行过它 —— 因为 `tmp` 一死，它的 signal 也没了，没人能触发重算。
-  真调 `c.Recompute()` 就是 UB。危险形态是"长命依赖 A + 短命依赖 B，B 先死，之后 A 变化触发重算"
-  —— 这条路径没有测试守着。**规则：`Computed` 不得比它的 compute 函数能读到的任何 State 活得久。**
+  真调 `c.recompute()` 就是 UB。危险形态是"长命依赖 A + 短命依赖 B，B 先死，之后 A 变化触发重算"
+  —— 这条路径没有测试守着。**规则：`computed` 不得比它的 compute 函数能读到的任何 state 活得久。**
   §3.1 否决 `Ref<T>` 的整个论证就站在这条规则上，但那里只是把它当成对现状的观察陈述，
   没有作为使用者必须遵守的前置条件写出来。
 
