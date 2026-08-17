@@ -69,6 +69,7 @@
 #define SIGNALS2_STATE_H_
 
 #include <algorithm>
+#include <cassert>
 #include <concepts>
 #include <cstdint>
 #include <functional>
@@ -218,6 +219,12 @@ public:
 protected:
   observable() = default;
   explicit observable(T init) : value_(std::move(init)) {}
+
+  template <typename... Args>
+    requires std::constructible_from<T, Args...>
+  explicit observable(std::in_place_t, Args&&... args)
+      : value_(std::forward<Args>(args)...) {}
+
   ~observable() = default;
 
   void emit() {
@@ -245,7 +252,9 @@ protected:
       const std::uint64_t emitted_revision = revision_;
 
       auto it = sig_.cbegin();
-      while (emitted_revision == revision_ && it != sig_.cend()) {
+      // Connections added by a callback start receiving on the next emission.
+      const auto end_it = sig_.cend();
+      while (emitted_revision == revision_ && it != end_it) {
         if (*it) {
           (*it)(value_);
         }
@@ -266,14 +275,17 @@ protected:
  *
  * set() notifies only when Equal considers the new value different. Equal is
  * stored in the state and defaults to std::equal_to<>. A T without operator==
- * must provide an explicit equality predicate, or use always_notify.
+ * must provide an explicit equality predicate, or use always_notify. The set()
+ * overloads participate only when T supports the corresponding assignment;
+ * non-assignable values can still be changed in place with mutate().
  */
 template <typename T, typename Equal = std::equal_to<>>
   requires std::predicate<Equal&, const T&, const T&>
 class state final : public observable<T> {
 public:
   state()
-    requires std::default_initializable<Equal>
+    requires std::default_initializable<T> &&
+             std::default_initializable<Equal>
   = default;
 
   explicit state(T init)
@@ -283,7 +295,21 @@ public:
   state(T init, Equal equal)
       : observable<T>(std::move(init)), equal_(std::move(equal)) {}
 
-  void set(const T& value) {
+  template <typename... Args>
+    requires std::default_initializable<Equal> &&
+             std::constructible_from<T, Args...>
+  explicit state(std::in_place_t, Args&&... args)
+      : observable<T>(std::in_place, std::forward<Args>(args)...) {}
+
+  template <typename... Args>
+    requires std::constructible_from<T, Args...>
+  state(Equal equal, std::in_place_t, Args&&... args)
+      : observable<T>(std::in_place, std::forward<Args>(args)...),
+        equal_(std::move(equal)) {}
+
+  void set(const T& value)
+    requires std::assignable_from<T&, const T&>
+  {
     if (std::invoke(equal_, this->value_, value)) {
       return;
     }
@@ -291,7 +317,9 @@ public:
     this->emit();
   }
 
-  void set(T&& value) {
+  void set(T&& value)
+    requires std::assignable_from<T&, T>
+  {
     if (std::invoke(equal_, this->value_, value)) {
       return;
     }
@@ -312,12 +340,16 @@ public:
     this->emit();
   }
 
-  state& operator=(const T& value) {
+  state& operator=(const T& value)
+    requires std::assignable_from<T&, const T&>
+  {
     set(value);
     return *this;
   }
 
-  state& operator=(T&& value) {
+  state& operator=(T&& value)
+    requires std::assignable_from<T&, T>
+  {
     set(std::move(value));
     return *this;
   }
@@ -332,22 +364,43 @@ private:
  *
  * No dependency list to keep in sync -- adding a get() to the lambda is enough.
  * There is deliberately no set(): a derived value has exactly one source.
+ * T must accept assignment from a newly computed T because every recompute
+ * replaces the current value.
  *
  * Binding is deferred rather than done in the constructor so that member
  * declaration order inside a model struct does not become load-bearing.
  */
 template <typename T, typename Equal = std::equal_to<>>
-  requires std::predicate<Equal&, const T&, const T&>
+  requires std::predicate<Equal&, const T&, const T&> &&
+           std::assignable_from<T&, T>
 class computed final : public observable<T>, private detail::dependency_tracker {
 public:
   computed()
-    requires std::default_initializable<Equal>
+    requires std::default_initializable<T> &&
+             std::default_initializable<Equal>
   = default;
 
-  explicit computed(Equal equal) : equal_(std::move(equal)) {}
+  explicit computed(Equal equal)
+    requires std::default_initializable<T>
+      : equal_(std::move(equal)) {}
+
+  template <typename... Args>
+    requires std::default_initializable<Equal> &&
+             std::constructible_from<T, Args...>
+  explicit computed(std::in_place_t, Args&&... args)
+      : observable<T>(std::in_place, std::forward<Args>(args)...) {}
+
+  template <typename... Args>
+    requires std::constructible_from<T, Args...>
+  computed(Equal equal, std::in_place_t, Args&&... args)
+      : observable<T>(std::in_place, std::forward<Args>(args)...),
+        equal_(std::move(equal)) {}
 
   /**
    * @brief set the compute function and evaluate it immediately.
+   *
+   * May be called only once for a computed object. Rebinding would retain
+   * subscriptions discovered by the previous compute function.
    *
    * Call this after every dependency has been constructed -- typically in
    * DoInit(), not in a member initializer.
@@ -355,6 +408,7 @@ public:
   template <typename F>
     requires std::invocable<F> && std::convertible_to<std::invoke_result_t<F>, T>
   void bind(F&& calc) {
+    assert(!bound() && "signals2::computed::bind() may only be called once");
     calc_ = std::forward<F>(calc);
     recompute();
   }

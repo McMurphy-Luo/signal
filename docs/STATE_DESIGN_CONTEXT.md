@@ -12,7 +12,7 @@
 | 文件 | 说明 |
 |---|---|
 | `include/signals/state.h` | 实现，header-only，依赖 `signals.h`（signals2） |
-| `test/state_test.cpp` | 26 组 Catch 行为测试，见 §7 |
+| `test/state_test.cpp` | 27 组 Catch 行为测试，见 §7 |
 | 本文档 | 设计上下文 |
 
 命名空间为 `signals2`，与 `signals.h` 同一个（早期迁移中曾用 `states`，已废弃）。
@@ -141,7 +141,9 @@ T next = [this] {
 ```
 
 否则**订阅者回调里的 `get()` 会被误记成本 computed 的依赖**。用 IIFE 而不是普通块作用域，是为了
-同时支持不可默认构造的 `T`（避免 `T next{}; { ... next = calc_(); }` 那种双初始化）。
+同时避免要求计算结果 `next` 默认构造（不使用 `T next{}; { ... next = calc_(); }` 那种双初始化）。`computed` 自身若使用默认构造，`T` 仍须默认可构造；不可默认构造的 `T` 应通过 `computed(std::in_place, args...)` 提供绑定前的合法初值。`state` 同样提供 `state(std::in_place, args...)`，可直接原地构造值。
+
+值类型约束按实际操作表达：`computed<T>` 的核心重算会执行 `value_ = std::move(next)`，因此类级要求 `std::assignable_from<T&, T>`；`state<T>` 不作类级赋值要求，`set(const T&)`、`set(T&&)` 和对应的赋值运算符分别只在该赋值表达式有效时参与重载。这样不可整体赋值的值仍可通过 `mutate()` 原地修改。两个类型的零参数构造只在 `T` 和需要默认生成的 `Equal` 都可默认构造时可用，`in_place` 构造不受此限制。
 
 zUI 的 `calc()` 没有这层隔离 —— 试跑完直接赋值。
 
@@ -172,6 +174,8 @@ Equal 返回 `true` 表示两个值属于同一个等价类：新值会被丢弃
 
 延迟绑定（在 `DoInit()` 里 `bind(...)`）让顺序无关，也让从 `SetComputed(fn, deps...)` 的迁移变成
 机械替换（删掉依赖列表即可）。
+
+`bind()` 是一次性操作。第二次绑定会让旧函数发现的依赖继续保留，破坏 §2.3 中“由一个 compute 函数可触达的 state 数量封顶”的约束；Debug 构建会通过 `assert` 直接报告误用。Release 构建不为这一使用错误增加运行时分支，调用方必须遵守只绑定一次的前置条件。
 
 zUI 的 `State(const std::function<T()>&)` 是构造即计算，它靠 `calc()` 那层外部封装绕开。我们没那个包袱。
 
@@ -485,7 +489,7 @@ y.bind([&]{ return x.get(); });
 
 ## 7. 测试矩阵
 
-`test/state_test.cpp`，26 组 Catch `TEST_CASE`，链进 `signals2_tests`。带 ★ 的是守护 §4 不变量的，
+`test/state_test.cpp`，27 组 Catch `TEST_CASE`，链进 `signals2_tests`。带 ★ 的是守护 §4 不变量的，
 重构后必须仍然通过。表里的编号对应源文件里的 `// ---- N. ----` 注释（Catch 用例名是描述性的，
 不带编号）。
 
@@ -501,6 +505,7 @@ y.bind([&]{ return x.get(); });
 | 8 | 容器上的 `mutate` | 原地修改 + 无条件通知 |
 | 9 | 无 operator== 的类型显式提供 BinaryPred | §2.5 严格默认策略 |
 | 9b | computed 保存有状态 BinaryPred | §2.5 对象级比较策略 |
+| 9c | state / computed 使用 std::in_place 构造值 | 不可移动 state 值、不可默认构造 computed 值、有状态 Equal 和赋值能力约束 |
 | 10 ★ | 收敛的反馈环停在不动点 | §2.7 相等性门禁即终止判据 |
 | 11 | `peek` 不建立依赖 | 逃生口语义 |
 | 12 | `const observable<T>&` 作参数（读） | §3.1 的替代方案 |

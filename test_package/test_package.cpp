@@ -8,7 +8,10 @@
 #include <vector>
 
 struct NonComparable {
-  int value = 0;
+  NonComparable() = delete;
+  explicit NonComparable(int initial) : value(initial) {}
+
+  int value;
 };
 
 int main() {
@@ -44,7 +47,7 @@ int main() {
   }
 
   signals2::state<NonComparable, signals2::always_notify> always(
-      NonComparable{1});
+      std::in_place, 1);
   int notifications = 0;
   conns.push_back(always.connect(
       [&notifications](const NonComparable&) { ++notifications; }));

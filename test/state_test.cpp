@@ -59,12 +59,89 @@ struct RvalueOnlyMutator {
   void operator()(std::vector<int>& values) && { values.push_back(3); }
 };
 
-template <typename T>
-concept HasDefaultState = requires { typename state<T>; };
+struct InPlaceOnly {
+  InPlaceOnly() = delete;
+  InPlaceOnly(int number, std::string text)
+      : number(number), text(std::move(text)) {}
+  InPlaceOnly(const InPlaceOnly&) = delete;
+  InPlaceOnly& operator=(const InPlaceOnly&) = delete;
+  InPlaceOnly(InPlaceOnly&&) = delete;
+  InPlaceOnly& operator=(InPlaceOnly&&) = delete;
 
-static_assert(HasDefaultState<int>);
-static_assert(!HasDefaultState<NoEq>);
+  int number;
+  std::string text;
+};
+
+struct NonDefaultValue {
+  NonDefaultValue() = delete;
+  NonDefaultValue(int number, std::string text)
+      : number(number), text(std::move(text)) {}
+
+  friend bool operator==(const NonDefaultValue&, const NonDefaultValue&) = default;
+
+  int number;
+  std::string text;
+};
+
+struct MoveOnlyValue {
+  explicit MoveOnlyValue(int number) : number(number) {}
+  MoveOnlyValue(const MoveOnlyValue&) = delete;
+  MoveOnlyValue& operator=(const MoveOnlyValue&) = delete;
+  MoveOnlyValue(MoveOnlyValue&&) = default;
+  MoveOnlyValue& operator=(MoveOnlyValue&&) = default;
+
+  friend bool operator==(const MoveOnlyValue&, const MoveOnlyValue&) = default;
+
+  int number;
+};
+
+template <typename T>
+concept HasState = requires { typename state<T>; };
+
+template <typename T>
+concept HasAlwaysNotifyComputed = requires { typename computed<T, always_notify>; };
+
+template <typename S, typename V>
+concept CanSetConstLvalue = requires(S& target, const V& value) {
+  target.set(value);
+};
+
+template <typename S, typename V>
+concept CanSetRvalue = requires(S& target, V&& value) {
+  target.set(std::move(value));
+};
+
+template <typename S, typename V>
+concept CanAssignConstLvalue = requires(S& target, const V& value) {
+  target = value;
+};
+
+template <typename S, typename V>
+concept CanAssignRvalue = requires(S& target, V&& value) {
+  target = std::move(value);
+};
+
+using InPlaceOnlyState = state<InPlaceOnly, always_notify>;
+using MoveOnlyState = state<MoveOnlyValue>;
+
+static_assert(HasState<int>);
+static_assert(!HasState<NoEq>);
 static_assert(!std::default_initializable<ModuloEqual>);
+static_assert(!std::default_initializable<InPlaceOnlyState>);
+static_assert(std::constructible_from<InPlaceOnlyState,
+                                      std::in_place_t, int, const char*>);
+static_assert(!CanSetConstLvalue<InPlaceOnlyState, InPlaceOnly>);
+static_assert(!CanSetRvalue<InPlaceOnlyState, InPlaceOnly>);
+static_assert(!CanAssignConstLvalue<InPlaceOnlyState, InPlaceOnly>);
+static_assert(!CanAssignRvalue<InPlaceOnlyState, InPlaceOnly>);
+static_assert(!CanSetConstLvalue<MoveOnlyState, MoveOnlyValue>);
+static_assert(CanSetRvalue<MoveOnlyState, MoveOnlyValue>);
+static_assert(!CanAssignConstLvalue<MoveOnlyState, MoveOnlyValue>);
+static_assert(CanAssignRvalue<MoveOnlyState, MoveOnlyValue>);
+static_assert(!HasAlwaysNotifyComputed<InPlaceOnly>);
+static_assert(!std::default_initializable<computed<NonDefaultValue>>);
+static_assert(std::constructible_from<computed<NonDefaultValue>,
+                                      std::in_place_t, int, const char*>);
 static_assert(!std::move_constructible<state<int>>);
 static_assert(!std::is_move_assignable_v<state<int>>);
 
@@ -89,15 +166,38 @@ TEST_CASE("state notifies only on a real change") {
 }
 
 // ---- 2. connect observes future notifications only ----
-TEST_CASE("connect does not invoke the callback immediately") {
-  state<std::string> s(std::string("hello"));
-  std::string seen;
-  std::vector<signals2::connection> conns;
-  conns.push_back(s.connect([&](const std::string& v) { seen = v; }));
+TEST_CASE("connect observes future notifications only") {
+  SECTION("connect does not invoke the callback immediately") {
+    state<std::string> s(std::string("hello"));
+    std::string seen;
+    std::vector<signals2::connection> conns;
+    conns.push_back(s.connect([&](const std::string& v) { seen = v; }));
 
-  CHECK(seen.empty());
-  s.set(std::string("world"));
-  CHECK(seen == "world");
+    CHECK(seen.empty());
+    s.set(std::string("world"));
+    CHECK(seen == "world");
+  }
+
+  SECTION("a callback connected during notification starts with the next notification") {
+    state<int> s(0);
+    int first_calls = 0;
+    int new_calls = 0;
+    std::vector<signals2::connection> connections;
+    connections.push_back(s.connect([&](int) {
+      ++first_calls;
+      if (connections.size() == 1) {
+        connections.push_back(s.connect([&](int) { ++new_calls; }));
+      }
+    }));
+
+    s.set(1);
+    CHECK(first_calls == 1);
+    CHECK(new_calls == 0);
+
+    s.set(2);
+    CHECK(first_calls == 2);
+    CHECK(new_calls == 1);
+  }
 }
 
 // ---- 3. connection lifetime: scope dies -> no more callbacks ----
@@ -249,6 +349,29 @@ TEST_CASE("computed accepts a stateful equality predicate") {
   CHECK(calls == 1);
 }
 
+// ---- 9c. state and computed construct non-default values in place ----
+TEST_CASE("state and computed support in-place value construction") {
+  state<InPlaceOnly, always_notify> source(std::in_place, 7, "state");
+  CHECK(source.get().number == 7);
+  CHECK(source.get().text == "state");
+
+  state<int, ModuloEqual> with_equal(ModuloEqual{2}, std::in_place, 5);
+  CHECK(with_equal.get() == 5);
+
+  state<int> input(1);
+  computed<NonDefaultValue> derived(std::in_place, 0, "initial");
+  CHECK(derived.get() == NonDefaultValue{0, "initial"});
+
+  derived.bind([&] { return NonDefaultValue{input.get(), "computed"}; });
+  CHECK(derived.get() == NonDefaultValue{1, "computed"});
+
+  input.set(2);
+  CHECK(derived.get() == NonDefaultValue{2, "computed"});
+
+  computed<int, ModuloEqual> computed_with_equal(
+      ModuloEqual{2}, std::in_place, 3);
+  CHECK(computed_with_equal.get() == 3);
+}
 // ---- 10. converging feedback terminates on the equality check -- §2.7 ----
 TEST_CASE("Feedback that settles converges to its fixed point") {
   // x and y feed each other, but x saturates, so the loop has a fixed point
