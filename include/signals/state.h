@@ -145,6 +145,8 @@ public:
 
   observable(const observable&) = delete;
   observable& operator=(const observable&) = delete;
+  observable(observable&&) = delete;
+  observable& operator=(observable&&) = delete;
 
   /**
    * @brief Read the current value, registering a dependency if a computed is
@@ -226,26 +228,30 @@ protected:
       return;
     }
 
-    emitting_ = true;
-    try {
-      do {
-        pending_emit_ = false;
-        const std::uint64_t emitted_revision = revision_;
+    struct notification_guard {
+      bool& emitting;
+      bool& pending;
 
-        auto it = sig_.cbegin();
-        while (emitted_revision == revision_ && it != sig_.cend()) {
-          if (*it) {
-            (*it)(value_);
-          }
-          ++it;
-        }
-      } while (pending_emit_);
-    } catch (...) {
+      ~notification_guard() {
+        pending = false;
+        emitting = false;
+      }
+    };
+
+    emitting_ = true;
+    notification_guard guard{emitting_, pending_emit_};
+    do {
       pending_emit_ = false;
-      emitting_ = false;
-      throw;
-    }
-    emitting_ = false;
+      const std::uint64_t emitted_revision = revision_;
+
+      auto it = sig_.cbegin();
+      while (emitted_revision == revision_ && it != sig_.cend()) {
+        if (*it) {
+          (*it)(value_);
+        }
+        ++it;
+      }
+    } while (pending_emit_);
   }
 
   T value_{};
@@ -301,8 +307,8 @@ public:
    */
   template <typename F>
     requires std::invocable<F, T&>
-  void mutate(F&& mutate) {
-    mutate(this->value_);
+  void mutate(F&& fn) {
+    std::invoke(std::forward<F>(fn), this->value_);
     this->emit();
   }
 
@@ -379,7 +385,7 @@ public:
     }
 
     // Claim an epoch for this pass. Any nested recompute() claims a later one.
-    const unsigned long long started = ++epoch_;
+    const std::uint64_t started = ++epoch_;
 
     // The immediately-invoked lambda ends the tracking scope before the value
     // is stored and subscribers run. Otherwise a subscriber's get() calls would
@@ -429,7 +435,7 @@ private:
   std::function<T()> calc_;
   std::vector<signals2::connection> deps_;
   std::vector<const void*> tracked_;
-  unsigned long long epoch_ = 0;
+  std::uint64_t epoch_ = 0;
 };
 
 }  // namespace signals2

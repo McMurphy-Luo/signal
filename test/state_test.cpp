@@ -54,12 +54,19 @@ struct ModuloEqual {
   int divisor;
 };
 
+struct RvalueOnlyMutator {
+  void operator()(std::vector<int>& values) & = delete;
+  void operator()(std::vector<int>& values) && { values.push_back(3); }
+};
+
 template <typename T>
 concept HasDefaultState = requires { typename state<T>; };
 
 static_assert(HasDefaultState<int>);
 static_assert(!HasDefaultState<NoEq>);
 static_assert(!std::default_initializable<ModuloEqual>);
+static_assert(!std::move_constructible<state<int>>);
+static_assert(!std::is_move_assignable_v<state<int>>);
 
 }  // namespace
 
@@ -202,8 +209,9 @@ TEST_CASE("mutate edits in place and always notifies") {
 
   list.mutate([](std::vector<int>& v) { v.push_back(1); });
   list.mutate([](std::vector<int>& v) { v.push_back(2); });
-  CHECK(list.get().size() == 2u);
-  CHECK(calls == 2);
+  list.mutate(RvalueOnlyMutator{});
+  CHECK(list.get() == std::vector<int>{1, 2, 3});
+  CHECK(calls == 3);
 }
 
 // ---- 9. a type without operator== supplies an explicit BinaryPred ----
